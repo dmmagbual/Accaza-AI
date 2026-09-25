@@ -167,7 +167,7 @@ async function runTool(tools, name, args, ctx) {
   let result;
   try { result = await tools.run(name, args && typeof args === "object" ? args : {}, ctx); }
   catch (error) { result = {error: String(error && error.message || "The tool failed.").slice(0, 300)}; }
-  if (ctx.onEvent) ctx.onEvent({type: "tool", name, status: result && result.error ? "failed" : "done"});
+  if (ctx.onEvent) ctx.onEvent({type: "tool", name, status: result && result.error ? "failed" : "done", args});
   const text = JSON.stringify(result === undefined ? {ok: true} : result);
   return text.length > MAX_TOOL_RESULT_CHARS ? {truncated: true, partial: text.slice(0, MAX_TOOL_RESULT_CHARS)} : result;
 }
