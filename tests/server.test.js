@@ -449,3 +449,65 @@ test("MCP client keeps the session, sends the token, and only read-only tools ar
   assert.equal(seen.at(-1).headers["mcp-session-id"], "S1");
   assert.deepEqual(Mcp.mcpTools([Object.assign({}, conn, {allowWrites: true})], KEY, fetchImpl).declarations.map(d => d.name), ["tracker__list_issues", "tracker__delete_issue"]);
 });
+
+// ---------- Model menu and added models ----------
+const Models = require("../functions/lib/models");
+function modelsDb(docs = {}) {
+  const store = Object.assign({}, docs);
+  const col = name => ({
+    doc: id => { id = id || "m" + Math.random().toString(36).slice(2, 8); return {id, get: async () => ({exists: Boolean(store[name + "/" + id]), data: () => store[name + "/" + id]}), set: async (v, o) => { store[name + "/" + id] = o && o.merge ? Object.assign({}, store[name + "/" + id], v) : v; }}; },
+    where: () => ({limit: () => ({get: async () => ({docs: Object.entries(store).filter(([k, v]) => k.startsWith(name + "/") && v.enabled === true).map(([k, v]) => ({id: k.split("/")[1], data: () => v}))})})}),
+  });
+  return {store, collection: col, runTransaction: async fn => fn({get: ref => ref.get(), set: (ref, v) => ref.set(v)})};
+}
+test("the model menu depends on the tier and includes shared added models", async () => {
+  const db = modelsDb({"models/a1": {label: "GPT", provider: "openai", format: "openai", model: "gpt-x", audience: "everyone", enabled: true}, "models/b2": {label: "Claude", provider: "anthropic", format: "anthropic", model: "c", audience: "owner", enabled: true}});
+  const guest = (await Models.menu(db, "guest")).map(m => m.id), owner = (await Models.menu(db, "owner")).map(m => m.id);
+  assert.deepEqual(guest, ["auto", "gemini-lite", "groq", "cerebras", "deepseek", "custom:a1"]);
+  assert.ok(owner.includes("gemini") && owner.includes("ollama") && owner.includes("custom:b2"));
+});
+test("members cannot pick staff-only models; an added model respects its daily cap", async () => {
+  const db = modelsDb({"models/a1": {label: "GPT", provider: "openai", format: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-x", audience: "everyone", dailyCap: 1, enabled: true, keyEnc: Crypto.encrypt("sk-1", KEY)}});
+  await assert.rejects(Models.resolvePick(db, "gemini", "member", {}, KEY, "d", 1), e => e.code === "permission-denied");
+  assert.equal(await Models.resolvePick(db, "auto", "member", {}, KEY, "d", 1), null);
+  const first = await Models.resolvePick(db, "custom:a1", "member", {}, KEY, "d", 1);
+  assert.equal(first.provider.name, "custom:a1");
+  await assert.rejects(Models.resolvePick(db, "custom:a1", "member", {}, KEY, "d", 2), e => e.code === "resource-exhausted");
+});
+test("an added model is tested before saving, and its key is stored encrypted", async () => {
+  const db = modelsDb();
+  await assert.rejects(Models.saveModel(db, {provider: "openai", model: "gpt-x", apiKey: "sk-bad"}, KEY, "u", 1, async () => ({ok: false, error: "401 invalid key"}), async () => [{address: "104.18.1.1"}]), /Test failed: 401/);
+  assert.equal(Object.keys(db.store).length, 0);
+  const saved = await Models.saveModel(db, {provider: "openai", model: "gpt-x", apiKey: "sk-good", audience: "staff", dailyCap: 50}, KEY, "u", 1, async () => ({ok: true, reply: "OK"}), async () => [{address: "104.18.1.1"}]);
+  const doc = db.store["models/" + saved.id];
+  assert.doesNotMatch(JSON.stringify(doc), /sk-good/); assert.equal(Crypto.decrypt(doc.keyEnc, KEY), "sk-good");
+  assert.equal(doc.baseUrl, "https://api.openai.com/v1"); assert.equal(doc.audience, "staff");
+  await assert.rejects(Models.saveModel(db, {provider: "custom", baseUrl: "http://10.0.0.5/v1", model: "m", apiKey: "k"}, KEY, "u", 1, async () => ({ok: true})), /https/);
+});
+test("a picked model goes first; the Auto chain stays behind it without duplicates", () => {
+  const req = {question: "q", history: [], keys: {}, tier: "member"};
+  req.chosen = AI.builtinProvider("groq", req);
+  assert.equal(AI.generalChatProviders(req).map(p => p.name).join(">"), "groq>gemini>cerebras>deepseek>ollama>ashna");
+  req.chosen = AI.builtinProvider("gemini-lite", req);
+  assert.equal(AI.generalChatProviders(req).map(p => p.name).join(">"), "gemini-lite>groq>cerebras>deepseek>ollama>ashna");
+  const withFile = Object.assign({}, req, {files: [{displayName: "a.pdf", mimeType: "application/pdf", uri: "u"}]});
+  withFile.chosen = AI.builtinProvider("groq", withFile);
+  assert.equal(AI.generalChatProviders(withFile)[0].name, "gemini", "a model that cannot read files is skipped when a file is attached");
+});
+test("Anthropic adapter streams text and runs tools", async () => {
+  const bodies = [];
+  const server = await serve((req, res) => {
+    let raw = ""; req.on("data", c => raw += c); req.on("end", () => {
+      bodies.push({body: JSON.parse(raw), key: req.headers["x-api-key"]});
+      res.writeHead(200, {"content-type": "text/event-stream"});
+      if (bodies.length === 1) res.end('event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"look"}}\n\nevent: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"q\\":\\"x\\"}"}}\n\n');
+      else res.end('data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done."}}\n\n');
+    });
+  });
+  const tools = {declarations: [{name: "look", description: "d", parameters: {type: "object"}}], run: async (n, a) => ({saw: a.q})};
+  const out = await AI.askAnthropic({label: "Claude", url: `http://127.0.0.1:${server.address().port}/v1/messages`, model: "c", maxTokens: 100}, "sk-ant", {question: "hi", history: [{role: "model", text: "skip me"}, {role: "user", text: "earlier"}], tools, system: "S"}, {firstMs: 3000, totalMs: 8000}, {onDelta: () => {}});
+  server.close();
+  assert.equal(out, "Done."); assert.equal(bodies[0].key, "sk-ant");
+  assert.equal(bodies[0].body.messages[0].role, "user");
+  assert.deepEqual(bodies[1].body.messages.at(-1).content[0], {type: "tool_result", tool_use_id: "t1", content: JSON.stringify({saw: "x"})});
+});

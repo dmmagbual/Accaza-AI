@@ -248,6 +248,49 @@ async function askOpenAiCompatible(provider, key, req, limits, ctx) {
   return finalAnswer(text);
 }
 
+// Anthropic Messages API (for owner-added Claude models), streaming with tool use.
+async function askAnthropic(provider, key, req, limits, ctx) {
+  const started = Date.now(), total = limits.totalMs;
+  const merged = [];
+  for (const row of chatHistory(req.history)) {
+    const role = row.role === "model" ? "assistant" : "user", text = textWithNote(row.text, [...row.files.map(f => f.displayName), ...row.fileNames]);
+    if (!merged.length && role === "assistant") continue;
+    if (merged.length && merged[merged.length - 1].role === role) merged[merged.length - 1].content += `\n\n${text}`;
+    else merged.push({role, content: text});
+  }
+  const files = req.files || [];
+  const current = files.length ? `${req.question}\n\n(The user attached ${files.map(f => f.displayName).join(", ")}, which you cannot open. Say so briefly.)` : req.question;
+  if (merged.length && merged[merged.length - 1].role === "user") merged[merged.length - 1].content += `\n\n${current}`; else merged.push({role: "user", content: current});
+  const messages = merged.map(m => ({role: m.role, content: [{type: "text", text: m.content}]}));
+  const tools = provider.tools !== false && req.tools && req.tools.declarations.length ? req.tools.declarations.map(d => ({name: d.name, description: d.description, input_schema: d.parameters || {type: "object", properties: {}}})) : null;
+  let text = "";
+  for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
+    const final = round === MAX_TOOL_ROUNDS || !tools, blocks = [];
+    const body = {model: provider.model, max_tokens: provider.maxTokens || 4000, system: systemText(req.system), messages, stream: true, temperature: 0.4};
+    if (tools) { body.tools = tools; body.tool_choice = final ? {type: "none"} : {type: "auto"}; }
+    const lim = round === 0 ? limits : roundLimits(started, total, FIRST_TEXT_MS);
+    await streamLines(provider.label, provider.url, {method: "POST", headers: {"content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"}, body: JSON.stringify(body)}, lim,
+      async (line, json, markText) => {
+        const data = json || sseData(line);
+        if (!data) return;
+        if (data.type === "error" || data.error) throw providerFailure(providerMessage(data, `${provider.label} could not answer right now.`));
+        if (data.type === "content_block_start") { blocks[data.index] = Object.assign({}, data.content_block, data.content_block.type === "tool_use" ? {json: ""} : {text: ""}); markText(); }
+        if (data.type === "content_block_delta" && blocks[data.index]) {
+          markText();
+          if (data.delta.type === "text_delta") { blocks[data.index].text += data.delta.text; text += data.delta.text; ctx.onDelta(data.delta.text); }
+          if (data.delta.type === "input_json_delta") blocks[data.index].json += data.delta.partial_json || "";
+        }
+        if (json && Array.isArray(json.content)) json.content.forEach(b => { if (b.type === "text" && b.text) { text += b.text; ctx.onDelta(b.text); } });
+      });
+    const uses = blocks.filter(b => b && b.type === "tool_use");
+    if (!uses.length) return finalAnswer(text);
+    messages.push({role: "assistant", content: blocks.filter(Boolean).map(b => b.type === "tool_use" ? {type: "tool_use", id: b.id, name: b.name, input: parseArgs(b.json)} : {type: "text", text: b.text || " "})});
+    const results = await Promise.all(uses.map((b, i) => i < MAX_TOOL_CALLS ? runTool(req.tools, b.name, parseArgs(b.json), ctx) : Promise.resolve({error: "Too many tool calls in one step."})));
+    messages.push({role: "user", content: uses.map((b, i) => ({type: "tool_result", tool_use_id: b.id, content: JSON.stringify(results[i])}))});
+  }
+  return finalAnswer(text);
+}
+
 async function askOllama(clientId, clientSecret, req, limits, ctx) {
   const tokens = Math.max(80, Math.min(OLLAMA_MAX_TOKENS, Math.floor((Number(limits.totalMs || 0) / 1000 - 12) * 5)));
   let text = "", cut = false;
@@ -268,26 +311,45 @@ function noToolsSystem(req) {
   return `${req.system || ""}\n\nTools (web search, skills, connected apps) are not available right now. If the question needs them, say so briefly and answer as well as you can.`.trim();
 }
 
-// req: {question, history, keys, tier, files?, system?, tools?}. With files, a second Gemini
-// attempt always follows the first, because only Gemini can read them.
-function generalChatProviders(req) {
-  const keys = req.keys || {}, files = req.files || [];
-  const key = name => headerValue(keys[name] ? keys[name]() : "");
-  const gemini = req.tier === "owner" || req.tier === "staff" ? GEMINI.strong : GEMINI.standard;
-  const retryGemini = gemini === GEMINI.strong || files.length > 0;
+// Built-in providers by id (the ids the model menu uses). files = can read attachments,
+// tools = can use web search / skills / connectors.
+const BUILTIN_IDS = ["gemini", "gemini-lite", "groq", "cerebras", "deepseek", "ollama", "ashna"];
+function builtinProvider(id, req) {
+  const keys = req.keys || {}, key = name => headerValue(keys[name] ? keys[name]() : "");
   const noTools = Object.assign({}, req, {tools: null, system: noToolsSystem(req)});
-  return [
-    {name: "gemini", model: gemini.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: (l, c) => askGemini(key("gemini"), gemini, req, l, c)},
-    // The newest Flash models often return 503 "high demand" (seen 25 Sep 2026), which fails in
-    // under a second; Flash-Lite is then the quickest good answer before the non-Google backups.
-    ...(retryGemini ? [{name: "gemini-lite", model: GEMINI.standard.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: (l, c) => askGemini(key("gemini"), GEMINI.standard, req, l, c)}] : []),
-    {name: "groq", model: GROQ.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("groq")), ask: (l, c) => askOpenAiCompatible(GROQ, key("groq"), req, l, c)},
-    {name: "cerebras", model: CEREBRAS.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("cerebras")), ask: (l, c) => askOpenAiCompatible(CEREBRAS, key("cerebras"), req, l, c)},
-    {name: "deepseek", model: DEEPSEEK.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("deepseek")), ask: (l, c) => askOpenAiCompatible(DEEPSEEK, key("deepseek"), req, l, c)},
-    {name: "ollama", model: "qwen3:8b", firstMs: OLLAMA_FIRST_TEXT_MS, enabled: () => Boolean(key("ollamaId") && key("ollamaSecret")), ask: (l, c) => askOllama(key("ollamaId"), key("ollamaSecret"), req, l, c)},
+  switch (id) {
+    case "gemini": return {name: "gemini", model: GEMINI.strong.model, files: true, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: (l, c) => askGemini(key("gemini"), GEMINI.strong, req, l, c)};
+    case "gemini-lite": return {name: "gemini-lite", model: GEMINI.standard.model, files: true, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: (l, c) => askGemini(key("gemini"), GEMINI.standard, req, l, c)};
+    case "groq": return {name: "groq", model: GROQ.model, files: false, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("groq")), ask: (l, c) => askOpenAiCompatible(GROQ, key("groq"), req, l, c)};
+    case "cerebras": return {name: "cerebras", model: CEREBRAS.model, files: false, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("cerebras")), ask: (l, c) => askOpenAiCompatible(CEREBRAS, key("cerebras"), req, l, c)};
+    case "deepseek": return {name: "deepseek", model: DEEPSEEK.model, files: false, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("deepseek")), ask: (l, c) => askOpenAiCompatible(DEEPSEEK, key("deepseek"), req, l, c)};
+    case "ollama": return {name: "ollama", model: "qwen3:8b", files: false, tools: false, firstMs: OLLAMA_FIRST_TEXT_MS, enabled: () => Boolean(key("ollamaId") && key("ollamaSecret")), ask: (l, c) => askOllama(key("ollamaId"), key("ollamaSecret"), req, l, c)};
     // Ashna keeps a reserved slice of the budget so a slow Qwen reply cannot use up the last turn.
-    {name: "ashna", model: ASHNA.model, firstMs: ASHNA_TIMEOUT_MS, reserveMs: ASHNA_TIMEOUT_MS, enabled: () => Boolean(key("ashna")), ask: (l, c) => askOpenAiCompatible(Object.assign({}, ASHNA, {tools: false}), key("ashna"), noTools, l, c)},
+    case "ashna": return {name: "ashna", model: ASHNA.model, files: false, tools: false, firstMs: ASHNA_TIMEOUT_MS, reserveMs: ASHNA_TIMEOUT_MS, enabled: () => Boolean(key("ashna")), ask: (l, c) => askOpenAiCompatible(Object.assign({}, ASHNA, {tools: false}), key("ashna"), noTools, l, c)};
+    default: return null;
+  }
+}
+
+// req: {question, history, keys, tier, files?, system?, tools?, chosen?}. "Auto" order: Gemini
+// (owner/staff: 3.8 Flash, then Flash-Lite) -> Groq -> Cerebras -> DeepSeek -> Qwen -> Ashna. With
+// files, a second Gemini attempt always follows the first, because only Gemini can read them.
+// req.chosen (a provider object from the model menu) goes first, unless files are attached and
+// it cannot read them; the rest of the Auto chain stays behind it as the fallback.
+function generalChatProviders(req) {
+  const files = req.files || [];
+  const strong = req.tier === "owner" || req.tier === "staff";
+  const first = builtinProvider(strong ? "gemini" : "gemini-lite", req);
+  const auto = [
+    Object.assign({}, first, {name: "gemini"}),
+    ...(strong || files.length ? [builtinProvider("gemini-lite", req)] : []),
+    ...["groq", "cerebras", "deepseek", "ollama", "ashna"].map(id => builtinProvider(id, req)),
   ];
+  const chosen = req.chosen;
+  if (chosen && (chosen.files || !files.length)) {
+    const same = p => p.name === chosen.name || (BUILTIN_IDS.includes(chosen.name) && p.model === chosen.model);
+    return [chosen, ...auto.filter(p => !same(p))];
+  }
+  return auto;
 }
 
 // hooks: {onDelta(text), onReset(), onEvent(event), onUnusual(answeredBy|null, failures)}.
@@ -340,5 +402,5 @@ async function geminiJson(key, model, system, prompt, timeoutMs = 8000, fetchImp
 module.exports = {
   ENDPOINTS, INSTRUCTION, GEMINI, REQUEST_BUDGET_MS, MIN_ATTEMPT_MS, HISTORY_ENTRIES, HISTORY_CHARS, MAX_TOOL_ROUNDS, MAX_TOOL_CALLS,
   cleanText, cleanMultiline, chatHistory, openAiMessages, geminiParts, systemText, providerFailure, finalAnswer, streamLines, sseData, trimToSentence, headerValue,
-  askGemini, askOpenAiCompatible, generalChatProviders, withFallback, geminiJson,
+  BUILTIN_IDS, askGemini, askOpenAiCompatible, askAnthropic, noToolsSystem, builtinProvider, generalChatProviders, withFallback, geminiJson,
 };

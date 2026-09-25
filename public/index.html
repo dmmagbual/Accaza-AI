@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'"/>
-<meta name="accaza-ai-build" content="10"/>
+<meta name="accaza-ai-build" content="11"/>
 <meta name="description" content="Accaza AI — a general-chat AI assistant."/>
 <meta name="theme-color" content="#19241b"/>
 <title>Accaza AI</title>
@@ -127,6 +127,8 @@
   #editBar{display:none;max-width:760px;margin:0 auto .4rem;font-size:.76rem;color:var(--muted);}
   #editBar a{color:var(--accent-ink);cursor:pointer;margin-left:.4rem;text-decoration:underline;}
   #askForm{max-width:760px;margin:0 auto;display:flex;gap:.5rem;align-items:flex-end;background:var(--input);border:1px solid var(--input-line);border-radius:16px;padding:.45rem .45rem .45rem .8rem;box-shadow:0 2px 10px rgba(0,0,0,.06);}
+  #modelSelect{align-self:flex-end;max-width:150px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:.35rem .3rem;font:inherit;font-size:.74rem;margin-bottom:.1rem;}
+  @media (max-width:520px){#modelSelect{max-width:96px;}}
   #question{flex:1;resize:none;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;font-size:.92rem;line-height:1.45;max-height:220px;padding:.4rem 0;}
   #askBtn{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:.55rem .9rem;font-weight:700;cursor:pointer;font-size:.85rem;}
   #askBtn.stop{background:var(--ink);color:var(--bg);}
@@ -321,6 +323,7 @@
       <form id="askForm">
         <button id="attachBtn" type="button" title="Attach photos or PDFs (up to 3, 7 MB each)" aria-label="Attach files">📎</button>
         <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/heic,image/heif,application/pdf,.heic,.heif" multiple hidden/>
+        <select id="modelSelect" title="Choose the AI model" aria-label="AI model"><option value="auto">Auto</option></select>
         <textarea id="question" maxlength="4000" rows="1" placeholder="Message Accaza AI, or attach a photo or PDF" aria-label="Message"></textarea>
         <button id="askBtn" type="submit">Ask</button>
       </form>
@@ -356,7 +359,7 @@
   <div id="settingsWrap">
     <div id="settingsInner">
       <h2>Settings</h2>
-      <div class="tabs"><button type="button" id="tabPersonal" class="on">Personalise</button><button type="button" id="tabMemory">Memory</button><button type="button" id="tabConnectors" style="display:none">Connectors</button></div>
+      <div class="tabs"><button type="button" id="tabPersonal" class="on">Personalise</button><button type="button" id="tabMemory">Memory</button><button type="button" id="tabConnectors" style="display:none">Connectors</button><button type="button" id="tabModels" style="display:none">Models</button></div>
       <div id="panePersonal">
         <div class="field"><label for="aboutMe">About you</label><small>What should Accaza AI know about you? For example your work, your business, your goals.</small><textarea id="aboutMe" rows="4" maxlength="1500"></textarea></div>
         <div class="field"><label for="replyStyle">How should Accaza AI reply?</label><small>Tone, length, format. For example "Short answers, bullet points, prices in PHP".</small><textarea id="replyStyle" rows="3" maxlength="1500"></textarea></div>
@@ -381,6 +384,22 @@
           <div class="field"><label for="mcpHeader">Header name (optional)</label><input type="text" id="mcpHeader" placeholder="Authorization"/></div>
           <label class="toggle"><input type="checkbox" id="mcpWrites"/><span>Allow actions that change things<small>Lets Accaza AI use tools that create, update or delete. Leave off unless you trust the server.</small></span></label>
           <button class="btn" type="button" id="mcpAddBtn">Add connector</button>
+        </div>
+      </div>
+      <div id="paneModels" style="display:none">
+        <div class="info" id="modelInfo"></div><div class="err" id="modelErr"></div>
+        <div class="skillCard"><b>Added models</b><p>Models you add with an API key appear in the model menu for the people you choose. Keys are stored encrypted and never shown again.</p><div id="modelAdminList"></div></div>
+        <div class="skillCard">
+          <b>Add a model</b>
+          <div class="field"><label for="mProvider">Provider</label><select id="mProvider" style="width:100%;padding:.5rem;border-radius:8px;border:1px solid var(--input-line);background:var(--input);color:var(--ink);font:inherit;font-size:.86rem"></select></div>
+          <div class="field" id="mBaseRow" style="display:none"><label for="mBase">API address (https, OpenAI-compatible)</label><input type="text" id="mBase" placeholder="https://example.com/v1"/></div>
+          <div class="field"><label for="mModel">Model name</label><small>Exactly as the provider names it, e.g. gpt-5-mini, claude-sonnet-4-5, mistral-large-latest.</small><input type="text" id="mModel" maxlength="120"/></div>
+          <div class="field"><label for="mLabel">Name in the menu (optional)</label><input type="text" id="mLabel" maxlength="60"/></div>
+          <div class="field"><label for="mKey">API key</label><input type="password" id="mKey" autocomplete="off"/></div>
+          <div class="field"><label for="mAudience">Who can use it</label><select id="mAudience" style="width:100%;padding:.5rem;border-radius:8px;border:1px solid var(--input-line);background:var(--input);color:var(--ink);font:inherit;font-size:.86rem"><option value="owner">Only me</option><option value="staff">Me and staff</option><option value="everyone">Everyone (members and guests too)</option></select></div>
+          <div class="field"><label for="mCap">Daily limit (messages, 0 = no limit)</label><input type="text" id="mCap" inputmode="numeric" value="0"/></div>
+          <label class="toggle"><input type="checkbox" id="mTools" checked/><span>Can use tools<small>Web search, skills and connectors. Untick if the model rejects tool calls.</small></span></label>
+          <button class="btn" type="button" id="mSaveBtn">Test &amp; save</button>
         </div>
       </div>
       <div id="paneMemory" style="display:none">
@@ -591,6 +610,8 @@ async function send(mode){
   const payload=saves()?{question,mode,chatId:current&&current.id}:{question,history,mode:'new'};
   if(sendIds&&sendIds.length)payload.attachments=sendIds;
   if(pinnedSkill&&saves())payload.skillId=pinnedSkill.id;
+  const pickedModel=by('modelSelect').value||'auto';
+  if(pickedModel!=='auto')payload.model=pickedModel;
   let toolLine=null;
   const showTool=t=>{
     if(!toolLine){toolLine=document.createElement('div');toolLine.className='toolLine live';ai.el.insertBefore(toolLine,ai.bubble);}
@@ -613,6 +634,9 @@ async function send(mode){
     if(toolLine){toolLine.remove();toolLine=null;}
     if(result.sources&&result.sources.length){ai.sources=result.sources;const el=sourcesEl(result.sources);if(ai.srcEl)ai.srcEl.replaceWith(el);else ai.el.insertBefore(el,ai.actions);ai.srcEl=el;}
     if(result.tools&&result.tools.length){ai.tools=result.tools;const tl=document.createElement('div');tl.className='toolLine';tl.textContent='Used: '+result.tools.map(t=>t.label).join(' · ');ai.el.insertBefore(tl,ai.bubble);}
+    if(result.chatId)rememberModel(result.chatId,pickedModel);
+    const note=result.modelNote||(pickedModel!=='auto'&&result.answeredBy?'Answered by '+result.answeredBy:'');
+    if(note){ai.modelNote=note;const nl=document.createElement('div');nl.className='toolLine';nl.textContent=note;ai.el.insertBefore(nl,ai.bubble);}
     const mem=result.memory;
     if(mem&&(mem.added.length||mem.updated.length||mem.removed.length)){ai.memory=[...mem.added.map(m=>'Saved: '+m.text),...mem.updated.map(m=>'Updated: '+m.text),...(mem.removed.length?[mem.removed.length+' removed']:[])].join('\n');}
     if(result.chatId){
@@ -636,7 +660,7 @@ async function send(mode){
 }
 
 function newChat(){
-  if(busy)return;current=null;turns=[];cancelEdit();pinnedSkill=null;clearChips();try{sessionStorage.removeItem(LAST_CHAT);sessionStorage.removeItem(GUEST_TURNS);}catch(e){}
+  if(busy)return;current=null;turns=[];cancelEdit();pinnedSkill=null;clearChips();applyModelFor(null);try{sessionStorage.removeItem(LAST_CHAT);sessionStorage.removeItem(GUEST_TURNS);}catch(e){}
   renderTurns();renderChatList();show('chatWrap');q.focus();
 }
 by('newChatBtn').addEventListener('click',newChat);
@@ -645,7 +669,7 @@ async function openChat(id,quiet){
   try{
     const data=(await accountCall({action:'messages',chatId:id})).data||{};
     current={id:data.chat.id,title:data.chat.title};turns=(data.messages||[]).map(m=>({role:m.role,text:m.text,id:m.id,attachments:m.attachments||[],sources:m.sources||[]}));
-    cancelEdit();renderTurns();renderChatList();show('chatWrap');try{sessionStorage.setItem(LAST_CHAT,id);}catch(e){}
+    cancelEdit();renderTurns();renderChatList();show('chatWrap');applyModelFor(id);try{sessionStorage.setItem(LAST_CHAT,id);}catch(e){}
   }catch(e){if(!quiet){chats=chats.filter(c=>c.id!==id);renderChatList();}newChat();}
 }
 function renderChatList(){
@@ -808,12 +832,39 @@ q.addEventListener('keydown',ev=>{
 // ---------- Settings: personalise + memory ----------
 function openSettings(tab){show('settingsWrap');selectTab(tab||'personal');loadSettings();}
 function selectTab(tab){
-  const t=['personal','memory','connectors'].includes(tab)?tab:'personal';
-  by('tabPersonal').classList.toggle('on',t==='personal');by('tabMemory').classList.toggle('on',t==='memory');by('tabConnectors').classList.toggle('on',t==='connectors');
-  by('panePersonal').style.display=t==='personal'?'block':'none';by('paneMemory').style.display=t==='memory'?'block':'none';by('paneConnectors').style.display=t==='connectors'?'block':'none';
+  const t=['personal','memory','connectors','models'].includes(tab)?tab:'personal';
+  by('tabPersonal').classList.toggle('on',t==='personal');by('tabMemory').classList.toggle('on',t==='memory');by('tabConnectors').classList.toggle('on',t==='connectors');by('tabModels').classList.toggle('on',t==='models');
+  by('panePersonal').style.display=t==='personal'?'block':'none';by('paneMemory').style.display=t==='memory'?'block':'none';by('paneConnectors').style.display=t==='connectors'?'block':'none';by('paneModels').style.display=t==='models'?'block':'none';
   if(t==='connectors')loadConnectors();
+  if(t==='models')loadModelAdmin();
 }
 by('tabConnectors').addEventListener('click',()=>selectTab('connectors'));
+by('tabModels').addEventListener('click',()=>selectTab('models'));
+let providerPresets=[];
+async function loadModelAdmin(){
+  showMsg('modelErr','');
+  try{
+    const d=(await accountCall({action:'modelList'})).data||{};providerPresets=d.providers||[];
+    const sel=by('mProvider');if(!sel.options.length){providerPresets.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.label;sel.appendChild(o);});}
+    const list=by('modelAdminList');list.replaceChildren();
+    if(!(d.models||[]).length){const n=document.createElement('div');n.className='sideNote';n.style.padding='0';n.textContent='None yet.';list.appendChild(n);}
+    (d.models||[]).forEach(m=>{
+      const row=document.createElement('div'),t=document.createElement('span'),x=document.createElement('button');row.className='fileRow';
+      t.textContent=m.label+' · '+m.providerLabel+' · '+{owner:'only me',staff:'me + staff',everyone:'everyone'}[m.audience]+(m.dailyCap?' · '+m.dailyCap+'/day':'');t.title=m.model;
+      x.type='button';x.textContent='✕';x.title='Remove';x.addEventListener('click',async()=>{x.disabled=true;try{await accountCall({action:'modelDelete',modelId:m.id});row.remove();loadModelMenu();}catch(e){x.disabled=false;}});
+      row.append(t,x);list.appendChild(row);
+    });
+  }catch(e){showMsg('modelErr',cleanErr(e,'Could not load models.'));}
+}
+by('mProvider').addEventListener('change',()=>{by('mBaseRow').style.display=by('mProvider').value==='custom'?'block':'none';});
+by('mSaveBtn').addEventListener('click',async()=>{
+  const b=by('mSaveBtn');b.disabled=true;showMsg('modelErr','');showMsg('modelInfo','Testing the key…');
+  try{
+    const r=(await accountCall({action:'modelSave',provider:by('mProvider').value,baseUrl:by('mBase').value,model:by('mModel').value,label:by('mLabel').value,apiKey:by('mKey').value,audience:by('mAudience').value,dailyCap:by('mCap').value,tools:by('mTools').checked})).data;
+    showMsg('modelInfo',r.label+' added. Test reply: "'+(r.reply||'OK')+'"');['mModel','mLabel','mKey','mBase'].forEach(id=>by(id).value='');loadModelAdmin();loadModelMenu();
+  }catch(e){showMsg('modelInfo','');showMsg('modelErr',cleanErr(e,'Could not add the model.'));}
+  b.disabled=false;
+});
 async function loadConnectors(){
   showMsg('connErr','');
   try{
@@ -955,6 +1006,24 @@ window.addEventListener('dragleave',()=>{dragDepth=Math.max(0,dragDepth-1);if(!d
 window.addEventListener('dragover',ev=>{if(inChat())ev.preventDefault();});
 window.addEventListener('drop',ev=>{dragDepth=0;document.body.classList.remove('dragging');if(!inChat())return;ev.preventDefault();if(ev.dataTransfer&&ev.dataTransfer.files.length)addFiles(ev.dataTransfer.files);});
 
+// ---------- Model menu ----------
+// "Auto" or a specific model; remembered per chat (and the last choice for new chats).
+const MODEL_MAP='accaza_ai_model_by_chat',MODEL_LAST='accaza_ai_model_last';
+let modelMenu=[];
+function readModelMap(){try{return JSON.parse(localStorage.getItem(MODEL_MAP)||'{}')||{};}catch(e){return {};}}
+function rememberModel(chatId,id){try{const m=readModelMap();if(chatId)m[chatId]=id;const keys=Object.keys(m);if(keys.length>200)delete m[keys[0]];localStorage.setItem(MODEL_MAP,JSON.stringify(m));localStorage.setItem(MODEL_LAST,id);}catch(e){}}
+function applyModelFor(chatId){
+  let id='auto';try{id=(chatId&&readModelMap()[chatId])||localStorage.getItem(MODEL_LAST)||'auto';}catch(e){}
+  const sel=by('modelSelect');sel.value=modelMenu.some(m=>m.id===id)?id:'auto';
+}
+async function loadModelMenu(){
+  try{modelMenu=((await accountCall({action:'models'})).data||{}).models||[];}catch(e){modelMenu=[{id:'auto',label:'Auto',note:'',files:true,tools:true}];}
+  const sel=by('modelSelect'),keep=sel.value;sel.replaceChildren();
+  modelMenu.forEach(m=>{const o=document.createElement('option');o.value=m.id;o.textContent=m.label+(m.id!=='auto'&&m.files?' 📎':'');o.title=m.note+(m.tools?'':' · no web search/skills');sel.appendChild(o);});
+  sel.value=modelMenu.some(m=>m.id===keep)?keep:'auto';applyModelFor(current&&current.id);
+}
+by('modelSelect').addEventListener('change',()=>rememberModel(current&&current.id,by('modelSelect').value));
+
 // ---------- Guest mode ----------
 // Guest mode is an explicit choice. Leaving guest mode keeps the same anonymous session, so
 // "exit and re-enter" cannot reset a guest's 10 messages.
@@ -1076,7 +1145,8 @@ async function render(user){
     if(me.tier==='unverified'){show('verifyWrap');return;}
     ME=me;setAllowance(me.remaining);
     if(me.tier==='owner')by('staffBtn').style.display='inline-block';
-    by('settingsBtn').style.display=saves()?'inline-block':'none';by('tabConnectors').style.display=(me.tier==='owner'||me.tier==='staff')?'inline-block':'none';
+    by('settingsBtn').style.display=saves()?'inline-block':'none';by('tabConnectors').style.display=(me.tier==='owner'||me.tier==='staff')?'inline-block':'none';by('tabModels').style.display=me.tier==='owner'?'inline-block':'none';
+    loadModelMenu();
     if(connectorReturn&&saves()){const st=connectorReturn;connectorReturn=null;openSettings('connectors');const msg={connected:'Google connected.','no-access':'Google connected, but no access was granted. Try again and tick the boxes.',cancelled:'Google sign-in was cancelled.',expired:'That sign-in link expired. Please try again.',error:'Google sign-in failed. Please try again.'}[st]||'';setTimeout(()=>{showMsg(st==='connected'?'connInfo':'connErr',msg);},400);}by('skillsBtn').style.display=saves()?'inline-block':'none';mySkills=[];
     by('whoLine').textContent=user.isAnonymous?'Guest':((me.name||user.email||'')+' · '+me.tier);
     if(saves()&&changed)await loadChats();else renderChatList();
