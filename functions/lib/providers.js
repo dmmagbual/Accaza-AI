@@ -44,10 +44,20 @@ function cleanText(value, max = 800) {
 function cleanMultiline(value, max) {
   return String(value || "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim().slice(0, max);
 }
+// History rows: {role, text, files?}. `files` is only ever set by the server from the caller's own
+// resolved uploads ({displayName, mimeType, uri}); it is never taken from the browser.
 function chatHistory(raw) {
   return (Array.isArray(raw) ? raw : []).slice(-HISTORY_ENTRIES)
-    .map(row => ({role: row && row.role === "model" ? "model" : "user", text: cleanMultiline(row && row.text, HISTORY_CHARS)}))
-    .filter(row => row.text.length >= 1);
+    .map(row => ({role: row && row.role === "model" ? "model" : "user", text: cleanMultiline(row && row.text, HISTORY_CHARS), files: row && Array.isArray(row.files) ? row.files.filter(f => f && f.uri && f.mimeType) : [], fileNames: row && Array.isArray(row.fileNames) ? row.fileNames.map(n => cleanText(n, 80)).filter(Boolean) : []}))
+    .filter(row => row.text.length >= 1 || row.files.length);
+}
+function fileNote(names) {
+  return names.length ? `[Attached: ${names.join(", ")}]` : "";
+}
+// Text for providers that cannot read files: the attachment is named so the model knows it exists.
+function textWithNote(text, names) {
+  const note = fileNote(names);
+  return note ? (text ? `${note}\n${text}` : note) : text;
 }
 function providerFailure(message) {
   return new HttpsError("unavailable", message, {providerFailure: true});
@@ -71,8 +81,15 @@ function trimToSentence(text) {
 function headerValue(value) {
   return String(value || "").replace(/[^\x21-\x7E]/g, "");
 }
-function openAiMessages(question, history) {
-  return [{role: "system", content: INSTRUCTION}, ...chatHistory(history).map(row => ({role: row.role === "model" ? "assistant" : "user", content: row.text})), {role: "user", content: question}];
+function openAiMessages(question, history, files = []) {
+  const current = files.length ? `${question}\n\n(The user attached ${files.length === 1 ? "a file" : files.length + " files"}: ${files.map(f => f.displayName).join(", ")}. You cannot open attachments right now. Say so in one short sentence, then help as far as you can without them.)` : question;
+  return [{role: "system", content: INSTRUCTION}, ...chatHistory(history).map(row => ({role: row.role === "model" ? "assistant" : "user", content: textWithNote(row.text, [...row.files.map(f => f.displayName), ...row.fileNames])})), {role: "user", content: current}];
+}
+function geminiParts(text, files, fileNames = []) {
+  const parts = files.map(f => ({fileData: {fileUri: f.uri, mimeType: f.mimeType}}));
+  const body = textWithNote(text, fileNames);
+  if (body) parts.push({text: body});
+  return parts;
 }
 
 // Streams one HTTP response line by line. The first-text timer aborts a provider that has not
@@ -124,8 +141,8 @@ function sseData(line) {
   try { return JSON.parse(payload); } catch (_error) { return null; }
 }
 
-async function askGemini(key, config, question, history, limits, ctx) {
-  const contents = [...chatHistory(history).map(row => ({role: row.role, parts: [{text: row.text}]})), {role: "user", parts: [{text: question}]}];
+async function askGemini(key, config, question, history, limits, ctx, files = []) {
+  const contents = [...chatHistory(history).map(row => ({role: row.role, parts: geminiParts(row.text, row.files, row.fileNames)})), {role: "user", parts: geminiParts(question, files)}];
   const generationConfig = {temperature: 0.4, maxOutputTokens: config.maxOutputTokens};
   if (config.thinkingLevel) generationConfig.thinkingConfig = {thinkingLevel: config.thinkingLevel};
   let text = "";
@@ -139,9 +156,9 @@ async function askGemini(key, config, question, history, limits, ctx) {
     async (line, body, markText) => take(body || sseData(line), markText));
   return finalAnswer(text);
 }
-async function askOpenAiCompatible(provider, key, question, history, limits, ctx) {
+async function askOpenAiCompatible(provider, key, question, history, limits, ctx, files = []) {
   let text = "";
-  await streamLines(provider.label, provider.url, {method: "POST", headers: {"content-type": "application/json", authorization: `Bearer ${key}`}, body: JSON.stringify(Object.assign({model: provider.model, messages: openAiMessages(question, history), temperature: 0.4, max_tokens: provider.maxTokens, stream: true}, provider.extra))}, limits,
+  await streamLines(provider.label, provider.url, {method: "POST", headers: {"content-type": "application/json", authorization: `Bearer ${key}`}, body: JSON.stringify(Object.assign({model: provider.model, messages: openAiMessages(question, history, files), temperature: 0.4, max_tokens: provider.maxTokens, stream: true}, provider.extra))}, limits,
     async (line, body, markText) => {
       const data = body || sseData(line);
       if (!data) return;
@@ -152,10 +169,10 @@ async function askOpenAiCompatible(provider, key, question, history, limits, ctx
     });
   return finalAnswer(text);
 }
-async function askOllama(clientId, clientSecret, question, history, limits, ctx) {
+async function askOllama(clientId, clientSecret, question, history, limits, ctx, files = []) {
   const tokens = Math.max(80, Math.min(OLLAMA_MAX_TOKENS, Math.floor((Number(limits.totalMs || 0) / 1000 - 12) * 5)));
   let text = "", cut = false;
-  await streamLines("Qwen", OLLAMA_URL, {method: "POST", headers: {"content-type": "application/json", "CF-Access-Client-Id": clientId, "CF-Access-Client-Secret": clientSecret}, body: JSON.stringify({model: "qwen3:8b", messages: openAiMessages(question, history), stream: true, think: false, options: {temperature: 0.4, num_predict: tokens}})}, limits,
+  await streamLines("Qwen", OLLAMA_URL, {method: "POST", headers: {"content-type": "application/json", "CF-Access-Client-Id": clientId, "CF-Access-Client-Secret": clientSecret}, body: JSON.stringify({model: "qwen3:8b", messages: openAiMessages(question, history, files), stream: true, think: false, options: {temperature: 0.4, num_predict: tokens}})}, limits,
     async (line, body, markText) => {
       let data = body;
       if (!data) { try { data = JSON.parse(line); } catch (_error) { return; } }
@@ -169,21 +186,24 @@ async function askOllama(clientId, clientSecret, question, history, limits, ctx)
 
 // keys: {gemini, groq, cerebras, deepseek, ollamaId, ollamaSecret, ashna} as getter functions.
 // tier: "owner" | "staff" get the strong Gemini model; everyone else the standard one.
-function generalChatProviders(question, history, keys, tier) {
+// files: attachments on the current question (resolved, owner-checked). With files, a second
+// Gemini attempt always follows the first, because only Gemini can read them.
+function generalChatProviders(question, history, keys, tier, files = []) {
   const key = name => headerValue(keys[name] ? keys[name]() : "");
   const gemini = tier === "owner" || tier === "staff" ? GEMINI.strong : GEMINI.standard;
-  const strong = gemini === GEMINI.strong;
+  const retryGemini = gemini === GEMINI.strong || files.length > 0;
+  const ask = (fn, ...args) => (limits, ctx) => fn(...args, question, history, limits, ctx, files);
   return [
-    {name: "gemini", model: gemini.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: (limits, ctx) => askGemini(key("gemini"), gemini, question, history, limits, ctx)},
+    {name: "gemini", model: gemini.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: ask(askGemini, key("gemini"), gemini)},
     // The newest Flash models often return 503 "high demand" (seen 25 Sep 2026), which fails in
     // under a second; Flash-Lite is then the quickest good answer before the non-Google backups.
-    ...(strong ? [{name: "gemini-lite", model: GEMINI.standard.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: (limits, ctx) => askGemini(key("gemini"), GEMINI.standard, question, history, limits, ctx)}] : []),
-    {name: "groq", model: GROQ.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("groq")), ask: (limits, ctx) => askOpenAiCompatible(GROQ, key("groq"), question, history, limits, ctx)},
-    {name: "cerebras", model: CEREBRAS.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("cerebras")), ask: (limits, ctx) => askOpenAiCompatible(CEREBRAS, key("cerebras"), question, history, limits, ctx)},
-    {name: "deepseek", model: DEEPSEEK.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("deepseek")), ask: (limits, ctx) => askOpenAiCompatible(DEEPSEEK, key("deepseek"), question, history, limits, ctx)},
-    {name: "ollama", model: "qwen3:8b", firstMs: OLLAMA_FIRST_TEXT_MS, enabled: () => Boolean(key("ollamaId") && key("ollamaSecret")), ask: (limits, ctx) => askOllama(key("ollamaId"), key("ollamaSecret"), question, history, limits, ctx)},
+    ...(retryGemini ? [{name: "gemini-lite", model: GEMINI.standard.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: ask(askGemini, key("gemini"), GEMINI.standard)}] : []),
+    {name: "groq", model: GROQ.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("groq")), ask: ask(askOpenAiCompatible, GROQ, key("groq"))},
+    {name: "cerebras", model: CEREBRAS.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("cerebras")), ask: ask(askOpenAiCompatible, CEREBRAS, key("cerebras"))},
+    {name: "deepseek", model: DEEPSEEK.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("deepseek")), ask: ask(askOpenAiCompatible, DEEPSEEK, key("deepseek"))},
+    {name: "ollama", model: "qwen3:8b", firstMs: OLLAMA_FIRST_TEXT_MS, enabled: () => Boolean(key("ollamaId") && key("ollamaSecret")), ask: ask(askOllama, key("ollamaId"), key("ollamaSecret"))},
     // Ashna keeps a reserved slice of the budget so a slow Qwen reply cannot use up the last turn.
-    {name: "ashna", model: ASHNA.model, firstMs: ASHNA_TIMEOUT_MS, reserveMs: ASHNA_TIMEOUT_MS, enabled: () => Boolean(key("ashna")), ask: (limits, ctx) => askOpenAiCompatible(ASHNA, key("ashna"), question, history, limits, ctx)},
+    {name: "ashna", model: ASHNA.model, firstMs: ASHNA_TIMEOUT_MS, reserveMs: ASHNA_TIMEOUT_MS, enabled: () => Boolean(key("ashna")), ask: ask(askOpenAiCompatible, ASHNA, key("ashna"))},
   ];
 }
 
@@ -219,6 +239,6 @@ async function withFallback(providers, hooks = {}) {
 
 module.exports = {
   INSTRUCTION, GEMINI, REQUEST_BUDGET_MS, MIN_ATTEMPT_MS, HISTORY_ENTRIES, HISTORY_CHARS,
-  cleanText, cleanMultiline, chatHistory, providerFailure, finalAnswer, streamLines, sseData, trimToSentence, headerValue,
+  cleanText, cleanMultiline, chatHistory, openAiMessages, geminiParts, providerFailure, finalAnswer, streamLines, sseData, trimToSentence, headerValue,
   generalChatProviders, withFallback,
 };

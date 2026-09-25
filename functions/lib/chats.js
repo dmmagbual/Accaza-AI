@@ -2,7 +2,8 @@
 // Saved chats for registered users (Danilo, 25 Sep 2026): owner, staff and members keep their
 // chats on any device. Guests' chats stay only in their browser tab.
 // users/{uid}/chats/{chatId}               {title, createdAt, updatedAt, messageCount}
-// users/{uid}/chats/{chatId}/messages/{id} {role: "user"|"model", text, at, provider?, model?}
+// users/{uid}/chats/{chatId}/messages/{id} {role: "user"|"model", text, at, provider?, model?,
+//                                           attachments?: [{id, displayName, mimeType, uri, expiresAt}]}
 // Only the server reads or writes these (Firestore rules deny browsers), and every path is built
 // from the caller's own uid, so nobody can read another person's chats.
 const {HttpsError} = require("firebase-functions/v2/https");
@@ -38,10 +39,10 @@ function planTurn(messages, mode, question) {
   const last = messages[messages.length - 1], before = messages[messages.length - 2];
   if (mode === "regenerate" || mode === "edit") {
     if (!last || last.role !== "model" || !before || before.role !== "user") throw new HttpsError("failed-precondition", "There is no answer to redo in this chat.");
-    if (mode === "regenerate") return {question: before.text, history: messages.slice(0, -2), remove: [last], keepUser: before};
-    return {question, history: messages.slice(0, -2), remove: [before, last], keepUser: null};
+    if (mode === "regenerate") return {question: before.text, history: messages.slice(0, -2), remove: [last], keepUser: before, attachments: before.attachments || []};
+    return {question, history: messages.slice(0, -2), remove: [before, last], keepUser: null, attachments: before.attachments || []};
   }
-  return {question, history: messages, remove: [], keepUser: null};
+  return {question, history: messages, remove: [], keepUser: null, attachments: []};
 }
 
 async function saveTurn(db, uid, chat, plan, result, now) {
@@ -53,7 +54,8 @@ async function saveTurn(db, uid, chat, plan, result, now) {
   if (!plan.keepUser) {
     const userRef = chatRef.collection("messages").doc();
     userMessageId = userRef.id;
-    batch.set(userRef, {role: "user", text: plan.question, at: now});
+    const attachments = (plan.attachments || []).map(f => ({id: f.id, displayName: f.displayName, mimeType: f.mimeType, uri: f.uri, expiresAt: f.expiresAt}));
+    batch.set(userRef, attachments.length ? {role: "user", text: plan.question, at: now, attachments} : {role: "user", text: plan.question, at: now});
   }
   const modelRef = chatRef.collection("messages").doc();
   batch.set(modelRef, {role: "model", text: result.answer, at: now + 1, provider: result.provider, model: result.model});
@@ -70,7 +72,7 @@ async function listChats(db, uid) {
 async function listMessages(db, uid, chatId) {
   const {ref, data} = await requireChat(db, uid, chatId);
   const snap = await ref.collection("messages").orderBy("at", "desc").limit(LIST_MESSAGES).get();
-  return {chat: {id: ref.id, title: data.title || "New chat"}, messages: snap.docs.map(doc => { const m = doc.data(); return {id: doc.id, role: m.role, text: m.text || "", at: m.at || 0}; }).reverse()};
+  return {chat: {id: ref.id, title: data.title || "New chat"}, messages: snap.docs.map(doc => { const m = doc.data(); return {id: doc.id, role: m.role, text: m.text || "", at: m.at || 0, attachments: (m.attachments || []).map(f => ({id: f.id, displayName: f.displayName, mimeType: f.mimeType, expiresAt: f.expiresAt}))}; }).reverse()};
 }
 async function renameChat(db, uid, chatId, title) {
   const {ref} = await requireChat(db, uid, chatId);
@@ -79,10 +81,13 @@ async function renameChat(db, uid, chatId, title) {
   await ref.set({title: clean}, {merge: true});
   return {id: ref.id, title: clean};
 }
+// Returns the attachment ids the chat used, so the caller can delete those files too.
 async function deleteChat(db, uid, chatId) {
   const {ref} = await requireChat(db, uid, chatId);
+  const snap = await ref.collection("messages").where("role", "==", "user").get();
+  const fileIds = [...new Set(snap.docs.flatMap(doc => (doc.data().attachments || []).map(f => f.id)).filter(Boolean))];
   await db.recursiveDelete(ref);
-  return {deleted: ref.id};
+  return {deleted: ref.id, fileIds};
 }
 async function deleteAllChats(db, uid) {
   await db.recursiveDelete(chatsRef(db, uid));
