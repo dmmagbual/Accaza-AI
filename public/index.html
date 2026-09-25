@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'"/>
-<meta name="accaza-ai-build" content="2"/>
+<meta name="accaza-ai-build" content="3"/>
 <meta name="description" content="Accaza AI — a general-chat AI assistant."/>
 <meta name="theme-color" content="#19241b"/>
 <title>Accaza AI</title>
@@ -120,7 +120,7 @@
   .md pre .codeBar{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:.3rem .6rem;font-size:.7rem;color:#9fb2a6;border-bottom:1px solid rgba(255,255,255,.08);font-family:Inter,Arial,sans-serif;}
   .md pre .codeBar button{background:transparent;border:0;color:#cfe0d5;cursor:pointer;font-size:.72rem;padding:.1rem .3rem;}
   .md table{border-collapse:collapse;margin:.7rem 0;display:block;overflow-x:auto;font-size:.86rem;}
-  .md th,.md td{border:1px solid var(--line);padding:.4rem .6rem;text-align:left;vertical-align:top;} .md th{background:var(--side);}
+  .md th,.md td{border:1px solid var(--line);padding:.4rem .6rem;text-align:left;vertical-align:top;min-width:7rem;} .md th{background:var(--side);}
   .md hr{border:0;border-top:1px solid var(--line);margin:1rem 0;}
   /* Composer */
   #composer{flex:0 0 auto;padding:.6rem 1rem calc(.8rem + env(safe-area-inset-bottom));}
@@ -138,14 +138,14 @@
   #staffInner{max-width:760px;margin:0 auto;}
   #staffWrap h2{font-family:'Playfair Display',serif;font-size:1.2rem;margin:0 0 .4rem;color:var(--accent-ink);}
   .stats{font-size:.78rem;color:var(--muted);margin:0 0 1rem;line-height:1.5;}
-  .user{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.7rem .8rem;margin-bottom:.55rem;display:flex;align-items:center;justify-content:space-between;gap:.6rem;}
-  .user b{font-size:.86rem;display:block;overflow-wrap:anywhere;}
-  .user small{font-size:.72rem;color:var(--muted);overflow-wrap:anywhere;}
+  .acct{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.7rem .8rem;margin-bottom:.55rem;display:flex;align-items:center;justify-content:space-between;gap:.6rem;}
+  .acct b{font-size:.86rem;display:block;overflow-wrap:anywhere;}
+  .acct small{font-size:.72rem;color:var(--muted);overflow-wrap:anywhere;}
   .pill{display:inline-block;font-size:.66rem;font-weight:700;border-radius:99px;padding:.1rem .45rem;margin-left:.3rem;vertical-align:middle;background:var(--side);color:var(--muted);}
   .pill.staff,.pill.owner{background:var(--accent-soft);color:var(--accent-ink);}
   .pill.removed{background:rgba(163,49,32,.15);color:var(--danger);}
-  .user button{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:.45rem .7rem;font-weight:700;font-size:.75rem;cursor:pointer;white-space:nowrap;}
-  .user button.remove{background:transparent;color:var(--danger);border:1px solid var(--danger);}
+  .acct button{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:.45rem .7rem;font-weight:700;font-size:.75rem;cursor:pointer;white-space:nowrap;}
+  .acct button.remove{background:transparent;color:var(--danger);border:1px solid var(--danger);}
 
   @media (max-width:820px){
     #menuBtn{display:inline-block;}
@@ -425,16 +425,23 @@ async function send(mode){
   const ai={role:'model',text:'',pending:true};turns.push(ai);renderTurns();
   ai.bubble.classList.add('pending','cursor');ai.bubble.textContent='Thinking…';
   setBusy(true);controller=new AbortController();
-  let text='',frame=0,slow=setTimeout(()=>{if(!text)ai.bubble.textContent='Still thinking… a backup AI is answering. This can take up to two minutes.';},20000);
-  const draw=()=>{frame=0;ai.bubble.classList.remove('pending');paint(ai.bubble,text,true);toBottom(false);};
+  let text='',shown=0,frame=0,slow=setTimeout(()=>{if(!text)ai.bubble.textContent='Still thinking… a backup AI is answering. This can take up to two minutes.';},20000);
+  // AI services send text in bursts; reveal it smoothly so replies "type out" like ChatGPT.
+  const draw=()=>{
+    frame=0;if(shown>text.length)shown=0;
+    if(shown<text.length){shown+=Math.max(2,Math.ceil((text.length-shown)/12));ai.bubble.classList.remove('pending');paint(ai.bubble,text.slice(0,shown),true);toBottom(false);}
+    if(shown<text.length)frame=requestAnimationFrame(draw);
+  };
   const payload=saves()?{question,mode,chatId:current&&current.id}:{question,history,mode:'new'};
   try{
     const {stream,data}=await chatCall.stream(payload,{signal:controller.signal});
     for await(const chunk of stream){
-      if(chunk&&chunk.reset)text='';else if(chunk&&chunk.delta)text+=chunk.delta;
+      if(chunk&&chunk.reset){text='';shown=0;}else if(chunk&&chunk.delta)text+=chunk.delta;
       if(!frame)frame=requestAnimationFrame(draw);
     }
     const result=await data;
+    // Let the typing animation finish (at most about a second) before the final render.
+    for(let i=0;i<60&&shown<text.length;i++)await new Promise(r=>setTimeout(r,16));
     text=result.answer||text;ai.pending=false;ai.text=text;paint(ai.bubble,text,false);ai.bubble.classList.remove('pending');
     if(result.tier)ME.tier=result.tier;setAllowance(result.allowance?result.allowance.remaining:null);
     if(result.chatId){
@@ -594,7 +601,7 @@ async function loadStaff(){
     const backups=Object.entries(t.backupAnswers||{}).map(([k,v])=>k+' '+v).join(', ')||'none';
     by('staffStats').textContent=`Today (${t.day}): ${t.limitedMessages||0} of ${t.sharedLimit||100} guest/member messages used. Backup AI answers: ${backups}. Unanswered questions: ${t.failedQuestions||0}.`;
     (data.users||[]).forEach(u=>{
-      const row=document.createElement('div');row.className='user';
+      const row=document.createElement('div');row.className='acct';
       const info=document.createElement('div'),title=document.createElement('b'),sub=document.createElement('small'),pill=document.createElement('span');
       const label=u.role==='owner'?'owner':u.role==='staff'?'staff':u.status==='removed'?'removed':'member';
       title.textContent=u.name||u.email;pill.className='pill '+label;pill.textContent=label;title.appendChild(pill);
