@@ -16,6 +16,12 @@ Live at **https://accaza-ai.web.app**.
   - Only Gemini can read files. When a file is attached, Gemini gets a second try, and then the text-only backups are told a file exists.
   - Daily upload cap: 20 for members/guests, 100 for owner/staff.
   - Deleting a chat, or all chats, also deletes its files.
+- **Memory** (registered users):
+  - Settings → Personalise has "About you" and "How should Accaza AI reply?", plus switches for Use memory and Learn from chats.
+  - After each reply, Flash-Lite looks at that one exchange and adds, updates or removes short memories. The answer shows "Memory updated ✓" when something changed.
+  - "remember that…" and "forget…" work even with learning off.
+  - Up to 50 memories. Card, bank, ID and phone numbers, passwords and health details are never stored (prompt rule plus a server-side filter).
+  - Settings → Memory lists every memory, with delete and delete all.
 - **Saved chats** in a sidebar for registered users (owner, staff, members), with rename, delete and delete all. Guests' chats stay in their browser tab only.
 - Models:
   - Owner and staff start on **Gemini 3.8 Flash**, then **Flash-Lite**.
@@ -39,6 +45,7 @@ Live at **https://accaza-ai.web.app**.
 - `functions/lib/providers.js`: the AI chain, timeouts and reply cleanup.
 - `functions/lib/access.js`: tiers, owner emails and daily limits.
 - `functions/lib/files.js`: attachment checks, the upload cap, the Gemini Files API, owner-bound resolution.
+- `functions/lib/memory.js`: settings, memories, extraction, sensitive-data filter.
 - `functions/lib/chats.js`: saved chats (create, regenerate, edit, list, rename, delete).
 - `firestore.rules`: browsers get no direct database access. Everything goes through the functions.
 - `tests/server.test.js`: unit tests.
@@ -47,6 +54,7 @@ Live at **https://accaza-ai.web.app**.
 
 - `users/{uid}`: email, name, role (owner/staff/member), status, approval stamps.
 - `users/{uid}/chats/{chatId}` and `.../messages/{id}`: saved chats. Only the server reads or writes them, always under the caller's own uid.
+- `users/{uid}/settings/profile` and `users/{uid}/memories/{id}`: personalisation and memory.
 - `uploads/{id}` (TTL `expireAt`) and `uploadUsage/{day}`: attachments and the daily upload cap.
 - `usage/{day}`: per-person and total message counts for members and guests (Manila day).
 - `chatLog/{id}`: analytics (who asked, which AI answered, and a SHA-256 hash of the question). The question text is not stored here.

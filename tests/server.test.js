@@ -11,12 +11,13 @@ const ok = text => () => Promise.resolve(text);
 const failure = message => () => Promise.reject(AI.providerFailure(message));
 
 test("chain order: staff get 3.8 Flash then Flash-Lite; others start on Flash-Lite", () => {
-  const staff = AI.generalChatProviders("hi", [], {}, "staff"), guest = AI.generalChatProviders("hi", [], {}, "guest");
+  const P = tier => AI.generalChatProviders({question: "hi", history: [], keys: {}, tier});
+  const staff = P("staff"), guest = P("guest");
   assert.equal(staff.map(p => p.name).join(">"), "gemini>gemini-lite>groq>cerebras>deepseek>ollama>ashna");
   assert.equal(staff[0].model, "gemini-3.8-flash");
   assert.equal(guest.map(p => p.name).join(">"), "gemini>groq>cerebras>deepseek>ollama>ashna");
   assert.equal(guest[0].model, "gemini-3.5-flash-lite");
-  assert.equal(AI.generalChatProviders("hi", [], {}, "member")[0].model, "gemini-3.5-flash-lite");
+  assert.equal(P("member")[0].model, "gemini-3.5-flash-lite");
 });
 test("a normal first answer records nothing", async () => {
   let calls = 0;
@@ -176,8 +177,8 @@ test("attachments resolve only for their owner and only before they expire", asy
 });
 test("with a file attached, Gemini gets a second try before the text-only backups", () => {
   const f = [{displayName: "menu.pdf", mimeType: "application/pdf", uri: "u"}];
-  assert.equal(AI.generalChatProviders("q", [], {}, "guest", f).map(p => p.name).slice(0, 3).join(">"), "gemini>gemini-lite>groq");
-  assert.equal(AI.generalChatProviders("q", [], {}, "guest").map(p => p.name).slice(0, 2).join(">"), "gemini>groq");
+  assert.equal(AI.generalChatProviders({question: "q", history: [], keys: {}, tier: "guest", files: f}).map(p => p.name).slice(0, 3).join(">"), "gemini>gemini-lite>groq");
+  assert.equal(AI.generalChatProviders({question: "q", history: [], keys: {}, tier: "guest"}).map(p => p.name).slice(0, 2).join(">"), "gemini>groq");
 });
 test("Gemini receives the files; text-only backups are told a file exists", () => {
   const f = [{displayName: "menu.pdf", mimeType: "application/pdf", uri: "gs://x"}];
@@ -189,4 +190,93 @@ test("Gemini receives the files; text-only backups are told a file exists", () =
 test("files only come from the server: browser-supplied history cannot smuggle a file", () => {
   const h = AI.chatHistory([{role: "user", text: "hi", attachments: ["f2"], files: "nope"}]);
   assert.deepEqual(h[0].files, []);
+});
+
+// ---------- Tool loop ----------
+test("Gemini tool loop: calls the tool, sends the result back with the model's parts, then streams the answer", async () => {
+  const bodies = [];
+  const server = await serve((req, res) => {
+    let raw = ""; req.on("data", c => raw += c); req.on("end", () => {
+      const body = JSON.parse(raw); bodies.push(body);
+      res.writeHead(200, {"content-type": "text/event-stream"});
+      if (bodies.length === 1) res.end('data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"lookup","args":{"q":"latte"}},"thoughtSignature":"sig1"}]}}]}\n\n');
+      else res.end('data: {"candidates":[{"content":{"parts":[{"text":"A latte is "}]}}]}\n\ndata: {"candidates":[{"content":{"parts":[{"text":"PHP 150."}]}}]}\n\n');
+    });
+  });
+  AI.ENDPOINTS.gemini = `http://127.0.0.1:${server.address().port}`;
+  const events = [], deltas = [];
+  const tools = {declarations: [{name: "lookup", description: "Find a price", parameters: {type: "object", properties: {q: {type: "string"}}}}], run: async (name, args) => ({price: args.q === "latte" ? 150 : null})};
+  const answer = await AI.askGemini("k", AI.GEMINI.standard, {question: "Latte price?", history: [], tools, system: "extra"}, {firstMs: 3000, totalMs: 8000}, {onDelta: d => deltas.push(d), onEvent: e => events.push(e.status)});
+  server.close(); AI.ENDPOINTS.gemini = "https://generativelanguage.googleapis.com";
+  assert.equal(answer, "A latte is PHP 150.");
+  assert.deepEqual(events, ["running", "done"]);
+  assert.equal(bodies[1].contents[1].parts[0].thoughtSignature, "sig1");
+  assert.deepEqual(bodies[1].contents[2].parts[0].functionResponse, {name: "lookup", response: {price: 150}});
+  assert.match(bodies[0].systemInstruction.parts[0].text, /extra$/);
+  assert.ok(bodies[0].tools && bodies[0].tools[0].functionDeclarations.length === 1);
+});
+test("OpenAI-compatible tool loop: streamed tool-call fragments are joined, then the answer streams", async () => {
+  const bodies = [];
+  const server = await serve((req, res) => {
+    let raw = ""; req.on("data", c => raw += c); req.on("end", () => {
+      bodies.push(JSON.parse(raw));
+      res.writeHead(200, {"content-type": "text/event-stream"});
+      if (bodies.length === 1) res.end('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"look","arguments":"{\\"q\\":"}}]}}]}\n\ndata: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"mocha\\"}"}}]}}]}\n\ndata: [DONE]\n');
+      else res.end('data: {"choices":[{"delta":{"content":"Mocha is PHP 175."}}]}\n\ndata: [DONE]\n');
+    });
+  });
+  const tools = {declarations: [{name: "lookup", description: "d", parameters: {type: "object"}}], run: async (name, args) => ({got: args.q})};
+  tools.declarations[0].name = "look";
+  const answer = await AI.askOpenAiCompatible({label: "T", url: `http://127.0.0.1:${server.address().port}/v1`, model: "m", maxTokens: 100, extra: {}}, "k", {question: "q", history: [], tools}, {firstMs: 3000, totalMs: 8000}, {onDelta: () => {}});
+  server.close();
+  assert.equal(answer, "Mocha is PHP 175.");
+  assert.equal(bodies[1].messages.at(-1).role, "tool");
+  assert.equal(bodies[1].messages.at(-1).content, JSON.stringify({got: "mocha"}));
+  assert.equal(bodies[1].messages.at(-2).tool_calls[0].function.arguments, '{"q":"mocha"}');
+});
+test("providers without tools are told tools are off; Ashna never gets tool declarations", () => {
+  const req = {question: "q", history: [], keys: {}, tier: "guest", system: "S", tools: {declarations: [{name: "x", description: "d", parameters: {}}], run: async () => ({})}};
+  const list = AI.generalChatProviders(req);
+  assert.ok(list.find(p => p.name === "ashna"));
+});
+
+// ---------- Memory ----------
+const Memory = require("../functions/lib/memory");
+test("sensitive details never go into memory", () => {
+  for (const bad of ["Card is 4111 1111 1111 1111", "My password is hunter2", "Takes medication for diabetes", "Phone 09171234567", "SSS number 34-1234567-8"]) assert.equal(Memory.isSensitive(bad), true, bad);
+  for (const ok of ["Runs a coffee shop in Sartoga", "Prefers prices in PHP", "Opened the shop in 2024"]) assert.equal(Memory.isSensitive(ok), false, ok);
+});
+test("personal block labels user-written text and lists memories only when memory is on", () => {
+  const block = Memory.personalBlock({aboutMe: "I own Accaza.", replyStyle: "Short answers.", useMemory: true}, [{text: "Prefers PHP"}]);
+  assert.match(block, /About the user \(written by the user/); assert.match(block, /- Prefers PHP/);
+  assert.doesNotMatch(Memory.personalBlock({useMemory: false}, [{text: "Prefers PHP"}]), /Prefers PHP/);
+});
+function memDb() {
+  const store = {};
+  const col = path => ({
+    doc: id => { id = id || "m" + Object.keys(store).length + Math.random().toString(36).slice(2, 6); const key = path + "/" + id; return {id, set: async (v, o) => { store[key] = o && o.merge ? Object.assign({}, store[key], v) : v; }, delete: async () => { delete store[key]; }, collection: sub => col(key + "/" + sub)}; },
+    orderBy: () => ({get: async () => ({docs: Object.entries(store).filter(([k]) => k.startsWith(path + "/") && k.split("/").length === path.split("/").length + 1).map(([k, v]) => ({id: k.split("/").pop(), data: () => v, ref: {delete: async () => { delete store[k]; }}})).sort((a, b) => b.data().updatedAt - a.data().updatedAt)}), limit: () => ({get: async () => ({docs: []})})}),
+  });
+  return {store, collection: name => col(name)};
+}
+test("learning adds, updates and removes memories, and drops sensitive ones", async () => {
+  const db = memDb();
+  const memories = [{id: "a1", text: "Runs a café"}, {id: "b2", text: "Likes long answers"}];
+  const extract = async () => ({add: ["Prefers prices in PHP", "Card 4111 1111 1111 1111"], update: [{id: "a1", text: "Runs Accaza Coffee in Sartoga"}], remove: ["b2", "zz"]});
+  const out = await Memory.learnFromTurn({db, uid: "u", settings: {learn: true, useMemory: true}, memories, question: "Use PHP. Remember my card 4111 1111 1111 1111", answer: "ok", chatId: "c", key: "k", now: 5, extract});
+  assert.deepEqual(out.added.map(a => a.text), ["Prefers prices in PHP"]);
+  assert.deepEqual(out.updated, [{id: "a1", text: "Runs Accaza Coffee in Sartoga"}]);
+  assert.deepEqual(out.removed, ["b2"]);
+});
+test("with learning off, only an explicit 'remember'/'forget' is processed", async () => {
+  let called = 0; const extract = async () => { called += 1; return {add: ["X"], update: [], remove: []}; };
+  const off = {learn: false, useMemory: true};
+  await Memory.learnFromTurn({db: memDb(), uid: "u", settings: off, memories: [], question: "What is a flat white?", answer: "", key: "k", now: 1, extract});
+  assert.equal(called, 0);
+  await Memory.learnFromTurn({db: memDb(), uid: "u", settings: off, memories: [], question: "Please remember that I open at 7am", answer: "", key: "k", now: 1, extract});
+  assert.equal(called, 1);
+});
+test("a failed or malformed extraction changes nothing", async () => {
+  const out = await Memory.learnFromTurn({db: memDb(), uid: "u", settings: {learn: true}, memories: [], question: "hi", answer: "", key: "k", now: 1, extract: async () => null});
+  assert.deepEqual(out, {added: [], updated: [], removed: []});
 });

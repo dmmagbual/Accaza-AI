@@ -1,5 +1,5 @@
 "use strict";
-// AI chain for the standalone Accaza AI app (ChatGPT-style, v1.1).
+// AI chain for the standalone Accaza AI app (ChatGPT-style, v1.3: memory, tools).
 // Order: Gemini (owner/staff: 3.8 Flash, then Flash-Lite) -> Groq -> Cerebras -> DeepSeek -> Qwen (Ollama on SUPERDAD) -> Ashna.
 // Replies stream: each provider pushes text pieces through ctx.onDelta as they arrive. A provider
 // that fails before or during its reply is a provider failure; if it had already streamed some
@@ -27,6 +27,8 @@ const CEREBRAS = {label: "Cerebras", url: "https://api.cerebras.ai/v1/chat/compl
 const DEEPSEEK = {label: "DeepSeek", url: "https://api.deepseek.com/chat/completions", model: "deepseek-flash", maxTokens: 2000, extra: {}};
 const ASHNA = {label: "Ashna", url: "https://api.ashna.ai/v1/api/chat/completions", model: "glm-5.3-flash", maxTokens: 1500, extra: {}};
 const OLLAMA_URL = "https://ollama.accazacoffee.com/api/chat";
+// Base URL for Gemini calls (tests point this at a local server).
+const ENDPOINTS = {gemini: "https://generativelanguage.googleapis.com"};
 
 const INSTRUCTION = [
   "You are Accaza AI, a helpful, knowledgeable AI assistant.",
@@ -81,9 +83,14 @@ function trimToSentence(text) {
 function headerValue(value) {
   return String(value || "").replace(/[^\x21-\x7E]/g, "");
 }
-function openAiMessages(question, history, files = []) {
+// System text = the base instruction plus per-request blocks (personalisation, memories, skill
+// catalogue, tool guidance). Blocks written by users are fenced and labelled as user data.
+function systemText(extra) {
+  return extra ? `${INSTRUCTION}\n\n${extra}` : INSTRUCTION;
+}
+function openAiMessages(question, history, files = [], system = "") {
   const current = files.length ? `${question}\n\n(The user attached ${files.length === 1 ? "a file" : files.length + " files"}: ${files.map(f => f.displayName).join(", ")}. You cannot open attachments right now. Say so in one short sentence, then help as far as you can without them.)` : question;
-  return [{role: "system", content: INSTRUCTION}, ...chatHistory(history).map(row => ({role: row.role === "model" ? "assistant" : "user", content: textWithNote(row.text, [...row.files.map(f => f.displayName), ...row.fileNames])})), {role: "user", content: current}];
+  return [{role: "system", content: systemText(system)}, ...chatHistory(history).map(row => ({role: row.role === "model" ? "assistant" : "user", content: textWithNote(row.text, [...row.files.map(f => f.displayName), ...row.fileNames])})), {role: "user", content: current}];
 }
 function geminiParts(text, files, fileNames = []) {
   const parts = files.map(f => ({fileData: {fileUri: f.uri, mimeType: f.mimeType}}));
@@ -93,7 +100,7 @@ function geminiParts(text, files, fileNames = []) {
 }
 
 // Streams one HTTP response line by line. The first-text timer aborts a provider that has not
-// produced any text within firstMs; once text flows, the whole reply must finish within totalMs.
+// produced anything within firstMs; once output flows, the whole call must finish within totalMs.
 async function streamLines(label, url, init, limits, onLine) {
   const controller = new AbortController(), started = Date.now();
   let gotText = false, timer = setTimeout(() => controller.abort(), Math.max(1000, limits.firstMs));
@@ -141,38 +148,110 @@ function sseData(line) {
   try { return JSON.parse(payload); } catch (_error) { return null; }
 }
 
-async function askGemini(key, config, question, history, limits, ctx, files = []) {
-  const contents = [...chatHistory(history).map(row => ({role: row.role, parts: geminiParts(row.text, row.files, row.fileNames)})), {role: "user", parts: geminiParts(question, files)}];
+// ---------- Tools ----------
+// req.tools = {declarations: [{name, description, parameters}], run: async (name, args, ctx) => object}
+// The model may call tools for up to MAX_TOOL_ROUNDS rounds (MAX_TOOL_CALLS each); the last round
+// has tools switched off so it must answer. Results are capped so one tool cannot flood the prompt.
+const MAX_TOOL_ROUNDS = 4;
+const MAX_TOOL_CALLS = 4;
+const MAX_TOOL_RESULT_CHARS = 12000;
+function roundLimits(started, totalMs, firstMs) {
+  const remaining = totalMs - (Date.now() - started);
+  if (remaining < 3000) throw providerFailure("Ran out of time while using tools.");
+  return {firstMs: Math.min(firstMs, remaining), totalMs: remaining};
+}
+async function runTool(tools, name, args, ctx) {
+  const declared = tools && tools.declarations.find(d => d.name === name);
+  if (!declared) return {error: `Unknown tool ${String(name).slice(0, 40)}.`};
+  if (ctx.onEvent) ctx.onEvent({type: "tool", name, status: "running", args});
+  let result;
+  try { result = await tools.run(name, args && typeof args === "object" ? args : {}, ctx); }
+  catch (error) { result = {error: String(error && error.message || "The tool failed.").slice(0, 300)}; }
+  if (ctx.onEvent) ctx.onEvent({type: "tool", name, status: result && result.error ? "failed" : "done"});
+  const text = JSON.stringify(result === undefined ? {ok: true} : result);
+  return text.length > MAX_TOOL_RESULT_CHARS ? {truncated: true, partial: text.slice(0, MAX_TOOL_RESULT_CHARS)} : result;
+}
+function parseArgs(raw) {
+  if (raw && typeof raw === "object") return raw;
+  try { return JSON.parse(raw || "{}"); } catch (_error) { return {}; }
+}
+
+async function askGemini(key, config, req, limits, ctx) {
+  const started = Date.now(), total = limits.totalMs;
+  const contents = [...chatHistory(req.history).map(row => ({role: row.role, parts: geminiParts(row.text, row.files, row.fileNames)})), {role: "user", parts: geminiParts(req.question, req.files || [])}];
   const generationConfig = {temperature: 0.4, maxOutputTokens: config.maxOutputTokens};
   if (config.thinkingLevel) generationConfig.thinkingConfig = {thinkingLevel: config.thinkingLevel};
+  const tools = req.tools && req.tools.declarations.length ? [{functionDeclarations: req.tools.declarations}] : null;
   let text = "";
-  const take = (body, markText) => {
-    if (body && body.error) throw providerFailure(providerMessage(body, "Gemini could not answer right now."));
-    const parts = body && body.candidates && body.candidates[0] && body.candidates[0].content && body.candidates[0].content.parts || [];
-    const piece = parts.filter(part => !part.thought).map(part => part.text || "").join("");
-    if (piece) { markText(); text += piece; ctx.onDelta(piece); }
-  };
-  await streamLines("Gemini", `https://generativelanguage.googleapis.com/v1beta/models/${config.model}:streamGenerateContent?alt=sse`, {method: "POST", headers: {"content-type": "application/json", "x-goog-api-key": key}, body: JSON.stringify({systemInstruction: {parts: [{text: INSTRUCTION}]}, contents, generationConfig})}, limits,
-    async (line, body, markText) => take(body || sseData(line), markText));
+  for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
+    const final = round === MAX_TOOL_ROUNDS || !tools, parts = [], calls = [];
+    const body = {systemInstruction: {parts: [{text: systemText(req.system)}]}, contents, generationConfig};
+    if (tools && !final) body.tools = tools;
+    if (tools && final) body.toolConfig = {functionCallingConfig: {mode: "NONE"}};
+    if (tools && final) body.tools = tools;
+    const lim = round === 0 ? limits : roundLimits(started, total, FIRST_TEXT_MS);
+    await streamLines("Gemini", `${ENDPOINTS.gemini}/v1beta/models/${config.model}:streamGenerateContent?alt=sse`, {method: "POST", headers: {"content-type": "application/json", "x-goog-api-key": key}, body: JSON.stringify(body)}, lim,
+      async (line, json, markText) => {
+        const data = json || sseData(line);
+        if (!data) return;
+        if (data.error) throw providerFailure(providerMessage(data, "Gemini could not answer right now."));
+        for (const part of (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || []) {
+          parts.push(part);
+          if (part.functionCall) { markText(); calls.push(part.functionCall); }
+          else if (part.text && !part.thought) { markText(); text += part.text; ctx.onDelta(part.text); }
+        }
+      });
+    if (!calls.length) return finalAnswer(text);
+    // Keep the model's parts verbatim (thought signatures must go back unchanged).
+    contents.push({role: "model", parts});
+    const results = await Promise.all(calls.map((call, i) => i < MAX_TOOL_CALLS ? runTool(req.tools, call.name, parseArgs(call.args), ctx) : Promise.resolve({error: "Too many tool calls in one step."})));
+    contents.push({role: "user", parts: calls.map((call, i) => ({functionResponse: {name: call.name, response: results[i] && typeof results[i] === "object" && !Array.isArray(results[i]) ? results[i] : {result: results[i]}}}))});
+  }
   return finalAnswer(text);
 }
-async function askOpenAiCompatible(provider, key, question, history, limits, ctx, files = []) {
+
+async function askOpenAiCompatible(provider, key, req, limits, ctx) {
+  const started = Date.now(), total = limits.totalMs;
+  const messages = openAiMessages(req.question, req.history, req.files || [], req.system);
+  const tools = provider.tools !== false && req.tools && req.tools.declarations.length ? req.tools.declarations.map(d => ({type: "function", function: {name: d.name, description: d.description, parameters: d.parameters}})) : null;
   let text = "";
-  await streamLines(provider.label, provider.url, {method: "POST", headers: {"content-type": "application/json", authorization: `Bearer ${key}`}, body: JSON.stringify(Object.assign({model: provider.model, messages: openAiMessages(question, history, files), temperature: 0.4, max_tokens: provider.maxTokens, stream: true}, provider.extra))}, limits,
-    async (line, body, markText) => {
-      const data = body || sseData(line);
-      if (!data) return;
-      if (data.error) throw providerFailure(providerMessage(data, `${provider.label} could not answer right now.`));
-      const choice = data.choices && data.choices[0] || {};
-      const piece = (choice.delta && choice.delta.content) || (choice.message && choice.message.content) || "";
-      if (piece) { markText(); text += piece; ctx.onDelta(piece); }
-    });
+  for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
+    const final = round === MAX_TOOL_ROUNDS || !tools, calls = [];
+    let roundText = "";
+    const body = Object.assign({model: provider.model, messages, temperature: 0.4, max_tokens: provider.maxTokens, stream: true}, provider.extra);
+    if (tools) { body.tools = tools; body.tool_choice = final ? "none" : "auto"; }
+    const lim = round === 0 ? limits : roundLimits(started, total, FIRST_TEXT_MS);
+    await streamLines(provider.label, provider.url, {method: "POST", headers: {"content-type": "application/json", authorization: `Bearer ${key}`}, body: JSON.stringify(body)}, lim,
+      async (line, json, markText) => {
+        const data = json || sseData(line);
+        if (!data) return;
+        if (data.error) throw providerFailure(providerMessage(data, `${provider.label} could not answer right now.`));
+        const choice = data.choices && data.choices[0] || {};
+        const delta = choice.delta || choice.message || {};
+        if (delta.content) { markText(); text += delta.content; roundText += delta.content; ctx.onDelta(delta.content); }
+        for (const tc of delta.tool_calls || []) {
+          markText();
+          const index = Number.isInteger(tc.index) ? tc.index : calls.length;
+          const call = calls[index] || (calls[index] = {id: "", name: "", arguments: ""});
+          if (tc.id) call.id = tc.id;
+          if (tc.function && tc.function.name) call.name += tc.function.name;
+          if (tc.function && tc.function.arguments) call.arguments += typeof tc.function.arguments === "string" ? tc.function.arguments : JSON.stringify(tc.function.arguments);
+        }
+      });
+    const real = calls.filter(c => c && c.name);
+    if (!real.length) return finalAnswer(text);
+    real.forEach((c, i) => { if (!c.id) c.id = `call_${round}_${i}`; });
+    messages.push({role: "assistant", content: roundText || "", tool_calls: real.map(c => ({id: c.id, type: "function", function: {name: c.name, arguments: c.arguments || "{}"}}))});
+    const results = await Promise.all(real.map((c, i) => i < MAX_TOOL_CALLS ? runTool(req.tools, c.name, parseArgs(c.arguments), ctx) : Promise.resolve({error: "Too many tool calls in one step."})));
+    real.forEach((c, i) => messages.push({role: "tool", tool_call_id: c.id, content: JSON.stringify(results[i])}));
+  }
   return finalAnswer(text);
 }
-async function askOllama(clientId, clientSecret, question, history, limits, ctx, files = []) {
+
+async function askOllama(clientId, clientSecret, req, limits, ctx) {
   const tokens = Math.max(80, Math.min(OLLAMA_MAX_TOKENS, Math.floor((Number(limits.totalMs || 0) / 1000 - 12) * 5)));
   let text = "", cut = false;
-  await streamLines("Qwen", OLLAMA_URL, {method: "POST", headers: {"content-type": "application/json", "CF-Access-Client-Id": clientId, "CF-Access-Client-Secret": clientSecret}, body: JSON.stringify({model: "qwen3:8b", messages: openAiMessages(question, history, files), stream: true, think: false, options: {temperature: 0.4, num_predict: tokens}})}, limits,
+  await streamLines("Qwen", OLLAMA_URL, {method: "POST", headers: {"content-type": "application/json", "CF-Access-Client-Id": clientId, "CF-Access-Client-Secret": clientSecret}, body: JSON.stringify({model: "qwen3:8b", messages: openAiMessages(req.question, req.history, req.files || [], noToolsSystem(req)), stream: true, think: false, options: {temperature: 0.4, num_predict: tokens}})}, limits,
     async (line, body, markText) => {
       let data = body;
       if (!data) { try { data = JSON.parse(line); } catch (_error) { return; } }
@@ -183,32 +262,35 @@ async function askOllama(clientId, clientSecret, question, history, limits, ctx,
     });
   return finalAnswer(cut ? trimToSentence(text) : text);
 }
+// Providers without tools still get the request's system blocks, plus a note that tools are off.
+function noToolsSystem(req) {
+  if (!req.tools || !req.tools.declarations.length) return req.system || "";
+  return `${req.system || ""}\n\nTools (web search, skills, connected apps) are not available right now. If the question needs them, say so briefly and answer as well as you can.`.trim();
+}
 
-// keys: {gemini, groq, cerebras, deepseek, ollamaId, ollamaSecret, ashna} as getter functions.
-// tier: "owner" | "staff" get the strong Gemini model; everyone else the standard one.
-// files: attachments on the current question (resolved, owner-checked). With files, a second
-// Gemini attempt always follows the first, because only Gemini can read them.
-function generalChatProviders(question, history, keys, tier, files = []) {
+// req: {question, history, keys, tier, files?, system?, tools?}. With files, a second Gemini
+// attempt always follows the first, because only Gemini can read them.
+function generalChatProviders(req) {
+  const keys = req.keys || {}, files = req.files || [];
   const key = name => headerValue(keys[name] ? keys[name]() : "");
-  const gemini = tier === "owner" || tier === "staff" ? GEMINI.strong : GEMINI.standard;
+  const gemini = req.tier === "owner" || req.tier === "staff" ? GEMINI.strong : GEMINI.standard;
   const retryGemini = gemini === GEMINI.strong || files.length > 0;
-  const ask = (fn, ...args) => (limits, ctx) => fn(...args, question, history, limits, ctx, files);
+  const noTools = Object.assign({}, req, {tools: null, system: noToolsSystem(req)});
   return [
-    {name: "gemini", model: gemini.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: ask(askGemini, key("gemini"), gemini)},
+    {name: "gemini", model: gemini.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: (l, c) => askGemini(key("gemini"), gemini, req, l, c)},
     // The newest Flash models often return 503 "high demand" (seen 25 Sep 2026), which fails in
     // under a second; Flash-Lite is then the quickest good answer before the non-Google backups.
-    ...(retryGemini ? [{name: "gemini-lite", model: GEMINI.standard.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: ask(askGemini, key("gemini"), GEMINI.standard)}] : []),
-    {name: "groq", model: GROQ.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("groq")), ask: ask(askOpenAiCompatible, GROQ, key("groq"))},
-    {name: "cerebras", model: CEREBRAS.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("cerebras")), ask: ask(askOpenAiCompatible, CEREBRAS, key("cerebras"))},
-    {name: "deepseek", model: DEEPSEEK.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("deepseek")), ask: ask(askOpenAiCompatible, DEEPSEEK, key("deepseek"))},
-    {name: "ollama", model: "qwen3:8b", firstMs: OLLAMA_FIRST_TEXT_MS, enabled: () => Boolean(key("ollamaId") && key("ollamaSecret")), ask: ask(askOllama, key("ollamaId"), key("ollamaSecret"))},
+    ...(retryGemini ? [{name: "gemini-lite", model: GEMINI.standard.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: (l, c) => askGemini(key("gemini"), GEMINI.standard, req, l, c)}] : []),
+    {name: "groq", model: GROQ.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("groq")), ask: (l, c) => askOpenAiCompatible(GROQ, key("groq"), req, l, c)},
+    {name: "cerebras", model: CEREBRAS.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("cerebras")), ask: (l, c) => askOpenAiCompatible(CEREBRAS, key("cerebras"), req, l, c)},
+    {name: "deepseek", model: DEEPSEEK.model, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("deepseek")), ask: (l, c) => askOpenAiCompatible(DEEPSEEK, key("deepseek"), req, l, c)},
+    {name: "ollama", model: "qwen3:8b", firstMs: OLLAMA_FIRST_TEXT_MS, enabled: () => Boolean(key("ollamaId") && key("ollamaSecret")), ask: (l, c) => askOllama(key("ollamaId"), key("ollamaSecret"), req, l, c)},
     // Ashna keeps a reserved slice of the budget so a slow Qwen reply cannot use up the last turn.
-    {name: "ashna", model: ASHNA.model, firstMs: ASHNA_TIMEOUT_MS, reserveMs: ASHNA_TIMEOUT_MS, enabled: () => Boolean(key("ashna")), ask: ask(askOpenAiCompatible, ASHNA, key("ashna"))},
+    {name: "ashna", model: ASHNA.model, firstMs: ASHNA_TIMEOUT_MS, reserveMs: ASHNA_TIMEOUT_MS, enabled: () => Boolean(key("ashna")), ask: (l, c) => askOpenAiCompatible(Object.assign({}, ASHNA, {tools: false}), key("ashna"), noTools, l, c)},
   ];
 }
 
-// hooks: {onDelta(text), onReset(), onUnusual(answeredBy|null, failures)}. onUnusual runs only
-// when a backup answered or nothing did, so a normal first-provider answer costs no extra write.
+// hooks: {onDelta(text), onReset(), onEvent(event), onUnusual(answeredBy|null, failures)}.
 async function withFallback(providers, hooks = {}) {
   const started = Date.now(), failures = [];
   let configured = 0;
@@ -221,7 +303,11 @@ async function withFallback(providers, hooks = {}) {
     const limits = {firstMs: Math.min(provider.firstMs || FIRST_TEXT_MS, remaining), totalMs: remaining};
     if (limits.firstMs < MIN_ATTEMPT_MS) { failures.push({provider: provider.name, reason: "Skipped: not enough time left."}); continue; }
     let streamed = false;
-    const ctx = {onDelta: piece => { if (!piece) return; streamed = true; if (hooks.onDelta) hooks.onDelta(piece); }};
+    const ctx = {
+      provider: provider.name,
+      onDelta: piece => { if (!piece) return; streamed = true; if (hooks.onDelta) hooks.onDelta(piece); },
+      onEvent: event => { if (hooks.onEvent) hooks.onEvent(event); },
+    };
     try {
       const answer = await provider.ask(limits, ctx);
       if (failures.length && hooks.onUnusual) await hooks.onUnusual(provider.name, failures);
@@ -237,8 +323,22 @@ async function withFallback(providers, hooks = {}) {
   throw new HttpsError("unavailable", "The AI service is temporarily unavailable. Please try again in a few minutes.");
 }
 
+// One-shot JSON call to Gemini (no streaming, no fallback) for small helper jobs such as memory
+// extraction. Returns null on any failure: helpers must never break a chat.
+async function geminiJson(key, model, system, prompt, timeoutMs = 8000, fetchImpl = fetch) {
+  if (!key) return null;
+  try {
+    const response = await fetchImpl(`${ENDPOINTS.gemini}/v1beta/models/${model}:generateContent`, {method: "POST", headers: {"content-type": "application/json", "x-goog-api-key": key}, signal: AbortSignal.timeout(timeoutMs),
+      body: JSON.stringify({systemInstruction: {parts: [{text: system}]}, contents: [{role: "user", parts: [{text: prompt}]}], generationConfig: {temperature: 0, maxOutputTokens: 800, responseMimeType: "application/json"}})});
+    if (!response.ok) return null;
+    const body = await response.json();
+    const text = ((body.candidates && body.candidates[0] && body.candidates[0].content && body.candidates[0].content.parts) || []).map(p => p.text || "").join("");
+    return JSON.parse(text);
+  } catch (_error) { return null; }
+}
+
 module.exports = {
-  INSTRUCTION, GEMINI, REQUEST_BUDGET_MS, MIN_ATTEMPT_MS, HISTORY_ENTRIES, HISTORY_CHARS,
-  cleanText, cleanMultiline, chatHistory, openAiMessages, geminiParts, providerFailure, finalAnswer, streamLines, sseData, trimToSentence, headerValue,
-  generalChatProviders, withFallback,
+  ENDPOINTS, INSTRUCTION, GEMINI, REQUEST_BUDGET_MS, MIN_ATTEMPT_MS, HISTORY_ENTRIES, HISTORY_CHARS, MAX_TOOL_ROUNDS, MAX_TOOL_CALLS,
+  cleanText, cleanMultiline, chatHistory, openAiMessages, geminiParts, systemText, providerFailure, finalAnswer, streamLines, sseData, trimToSentence, headerValue,
+  askGemini, askOpenAiCompatible, generalChatProviders, withFallback, geminiJson,
 };
