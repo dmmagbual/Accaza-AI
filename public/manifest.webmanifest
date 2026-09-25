@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "Accaza AI",
+  "short_name": "Accaza AI",
+  "description": "Accaza AI — general chat assistant.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#e0d4c6",
+  "theme_color": "#19241b",
+  "icons": [
+    {"src":"/favicon_192x192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"/favicon_512x512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}

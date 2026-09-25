@@ -1,0 +1,111 @@
+"use strict";
+// Accaza AI (standalone): general chat only. Firebase project accaza-ai. It has no access to
+// the Accaza Coffee project or its data. Browsers never touch Firestore directly (rules deny
+// all); every read and write happens here.
+const crypto = require("crypto");
+const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {defineSecret} = require("firebase-functions/params");
+const {setGlobalOptions} = require("firebase-functions/v2");
+const {initializeApp} = require("firebase-admin/app");
+const {getFirestore, FieldValue} = require("firebase-admin/firestore");
+const AI = require("./lib/providers");
+const Access = require("./lib/access");
+
+initializeApp();
+setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
+const RELEASE_VERSION = "1.0";
+
+const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
+const GROQ_API_KEY = defineSecret("GROQ_API_KEY");
+const CEREBRAS_API_KEY = defineSecret("CEREBRAS_API_KEY");
+const DEEPSEEK_API_KEY = defineSecret("DEEPSEEK_API_KEY");
+const OLLAMA_ACCESS_CLIENT_ID = defineSecret("OLLAMA_ACCESS_CLIENT_ID");
+const OLLAMA_ACCESS_CLIENT_SECRET = defineSecret("OLLAMA_ACCESS_CLIENT_SECRET");
+const ASHNA_API_KEY = defineSecret("ASHNA_API_KEY");
+const AI_SECRETS = [GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY];
+const KEYS = {
+  gemini: () => GEMINI_API_KEY.value(), groq: () => GROQ_API_KEY.value(), cerebras: () => CEREBRAS_API_KEY.value(), deepseek: () => DEEPSEEK_API_KEY.value(),
+  ollamaId: () => OLLAMA_ACCESS_CLIENT_ID.value(), ollamaSecret: () => OLLAMA_ACCESS_CLIENT_SECRET.value(), ashna: () => ASHNA_API_KEY.value(),
+};
+
+// Only unusual outcomes are written (a backup answered, or nothing answered).
+async function recordProviderHealth(db, surface, answeredBy, failures) {
+  const now = Date.now(), event = {at: now, answeredBy: answeredBy || "none", surface, failures: failures.slice(0, 6).map(row => ({provider: row.provider, reason: AI.cleanText(row.reason, 160)}))};
+  console.warn(JSON.stringify({event: answeredBy ? "ai_backup_answered" : "ai_all_providers_failed", severity: answeredBy ? "WARNING" : "ERROR", ...event}));
+  try {
+    const update = {lastEvent: event, updatedAt: now, failedQuestions: FieldValue.increment(answeredBy ? 0 : 1)};
+    failures.forEach(row => { update[`providerFailures.${row.provider}`] = FieldValue.increment(1); });
+    if (answeredBy) update[`backupAnswers.${answeredBy}`] = FieldValue.increment(1);
+    const ref = db.collection("providerHealth").doc(Access.manilaDay(now));
+    await ref.set({}, {merge: true});
+    await ref.update(update);
+  } catch (_error) { /* monitoring must never block or fail an answer */ }
+}
+
+exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256MiB", secrets: AI_SECRETS}, async request => {
+  const db = getFirestore(), account = await Access.resolveAccount(db, request.auth);
+  const question = AI.cleanText(request.data && request.data.question, 800), history = AI.chatHistory(request.data && request.data.history);
+  if (question.length < 2) throw new HttpsError("invalid-argument", "Type a question first.");
+  const now = Date.now(), day = Access.manilaDay(now), limited = !Access.unlimited(account.tier);
+  const allowance = limited ? await Access.claimMessage(db, account.uid, day, now) : null;
+  let result;
+  try {
+    result = await AI.withFallback(AI.generalChatProviders(question, history, KEYS), (answeredBy, failures) => recordProviderHealth(db, account.tier, answeredBy, failures));
+  } catch (error) {
+    if (limited) await Access.releaseMessage(db, account.uid, day);
+    throw error;
+  }
+  // The log keeps who asked, which AI answered and a hash of the question, never the text.
+  await db.collection("chatLog").add({at: now, day, uid: account.uid, tier: account.tier, provider: result.provider, backupsTried: result.failures.length, questionHash: crypto.createHash("sha256").update(question).digest("hex"), used: allowance ? allowance.used : null});
+  return {answer: result.answer, sources: [], provider: result.provider, tier: account.tier, allowance, releaseVersion: RELEASE_VERSION};
+});
+
+// Account actions. "me" registers the caller on first use and reports their tier and today's
+// allowance. The owner can list accounts and approve or remove staff.
+exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 30, memory: "256MiB"}, async request => {
+  const db = getFirestore(), auth = request.auth, data = request.data || {}, action = AI.cleanText(data.action, 20), now = Date.now(), day = Access.manilaDay(now);
+  if (!auth || !auth.uid) throw new HttpsError("unauthenticated", "Sign in first.");
+  if (action === "me") {
+    if (Access.isAnonymous(auth)) {
+      const used = await Access.usedToday(db, auth.uid, day);
+      return {tier: "guest", emailVerified: false, limit: Access.DAILY_LIMIT, remaining: Math.max(0, Access.DAILY_LIMIT - used)};
+    }
+    const email = Access.normalEmail(auth.token && auth.token.email), verified = auth.token && auth.token.email_verified === true;
+    const ref = db.collection("users").doc(auth.uid), snap = await ref.get(), user = snap.exists ? snap.data() : null;
+    const owner = verified && Access.isOwnerEmail(email), name = Access.cleanName(data.name) || (user && user.name) || Access.cleanName(auth.token.name) || "";
+    if (!user) await ref.set({email, name, role: owner ? "owner" : "member", status: owner ? "approved" : "pending", createdAt: now, updatedAt: now});
+    else {
+      const patch = {email, updatedAt: now, lastSeenAt: now};
+      if (Access.cleanName(data.name)) patch.name = name;
+      if (owner && user.role !== "owner") Object.assign(patch, {role: "owner", status: "approved"});
+      await ref.set(patch, {merge: true});
+    }
+    if (!verified) return {tier: "unverified", emailVerified: false, email, name};
+    const account = await Access.resolveAccount(db, auth);
+    if (Access.unlimited(account.tier)) return {tier: account.tier, emailVerified: true, email, name, limit: null, remaining: null};
+    const used = await Access.usedToday(db, auth.uid, day);
+    return {tier: account.tier, emailVerified: true, email, name, limit: Access.DAILY_LIMIT, remaining: Math.max(0, Access.DAILY_LIMIT - used), pendingApproval: true};
+  }
+  const actor = await Access.resolveAccount(db, auth);
+  if (actor.tier !== "owner") throw new HttpsError("permission-denied", "Only the owner can manage staff.");
+  if (action === "list") {
+    const [usersSnap, usageSnap, healthSnap] = await Promise.all([db.collection("users").orderBy("createdAt", "desc").limit(200).get(), db.collection("usage").doc(day).get(), db.collection("providerHealth").doc(day).get()]);
+    const usage = usageSnap.exists ? usageSnap.data() : {}, health = healthSnap.exists ? healthSnap.data() : {};
+    return {
+      users: usersSnap.docs.map(doc => { const u = doc.data(); return {uid: doc.id, email: u.email || "", name: u.name || "", role: u.role || "member", status: u.status || "pending", createdAt: u.createdAt || 0, lastSeenAt: u.lastSeenAt || 0}; }),
+      today: {day, limitedMessages: Number(usage.total || 0), sharedLimit: Access.SHARED_DAILY_LIMIT, backupAnswers: health.backupAnswers || {}, providerFailures: health.providerFailures || {}, failedQuestions: Number(health.failedQuestions || 0)},
+    };
+  }
+  if (action === "approve" || action === "remove") {
+    const uid = AI.cleanText(data.uid, 128);
+    if (!uid || uid === actor.uid) throw new HttpsError("invalid-argument", "Choose another account.");
+    const ref = db.collection("users").doc(uid), snap = await ref.get();
+    if (!snap.exists) throw new HttpsError("not-found", "That account was not found.");
+    if (snap.data().role === "owner") throw new HttpsError("failed-precondition", "The owner account cannot be changed here.");
+    const patch = action === "approve" ? {role: "staff", status: "approved", approvedAt: now, approvedBy: actor.uid} : {role: "member", status: "removed", removedAt: now, removedBy: actor.uid};
+    await ref.set(Object.assign(patch, {updatedAt: now}), {merge: true});
+    await db.collection("adminLog").add({at: now, action, uid, by: actor.uid, email: snap.data().email || ""});
+    return {ok: true, uid, role: patch.role, status: patch.status};
+  }
+  throw new HttpsError("invalid-argument", "Unknown action.");
+});

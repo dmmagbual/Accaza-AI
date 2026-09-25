@@ -1,0 +1,9 @@
+{
+  "name": "accaza-ai",
+  "private": true,
+  "description": "Accaza AI: standalone general-chat app (Firebase project accaza-ai)",
+  "scripts": {
+    "test": "node --test tests/server.test.js",
+    "deploy": "firebase deploy --project accaza-ai"
+  }
+}

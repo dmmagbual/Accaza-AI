@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'"/>
+<meta name="accaza-ai-build" content="1"/>
+<meta name="description" content="Accaza AI — a general-chat AI assistant."/>
+<meta name="theme-color" content="#19241b"/>
+<title>Accaza AI</title>
+<link rel="manifest" href="/manifest.webmanifest"/>
+<link rel="icon" type="image/x-icon" href="/favicon.ico"/>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon_32x32.png"/>
+<link rel="apple-touch-icon" sizes="180x180" href="/favicon_180x180.png"/>
+<link rel="icon" type="image/png" sizes="192x192" href="/favicon_192x192.png"/>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+  :root{--bg:#e0d4c6;--ink:#2d261e;--muted:#6e6256;--panel:#fffdf9;--line:#eadfce;--accent:#2f5c43;--accent-ink:#284c39;--bubble-user:#2f5c43;--bubble-ai:#f3eee5;--danger:#a33120;--ok:#2f5c43;}
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{margin:0;font-family:Inter,Arial,sans-serif;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;}
+  .topbar{background:#19241b;color:#f5f0e8;padding:.85rem 1.1rem;display:flex;align-items:center;justify-content:space-between;gap:.7rem;}
+  .brand b{font-family:'Playfair Display',serif;font-size:1.15rem;}
+  .brand small{display:block;font-size:.7rem;color:rgba(245,240,232,.72);margin-top:.1rem;}
+  .topbar button{background:transparent;border:1px solid rgba(245,240,232,.4);color:#f5f0e8;border-radius:6px;padding:.4rem .65rem;font-size:.75rem;cursor:pointer;font-weight:600;}
+  .topbar button:hover{background:rgba(245,240,232,.12);}
+  #topbarActions{display:none;gap:.5rem;flex-wrap:wrap;justify-content:flex-end;}
+  main{flex:1;min-height:0;display:flex;flex-direction:column;max-width:720px;width:100%;margin:0 auto;}
+
+  /* Account cards (login, register, reset, verify) */
+  .cardWrap{flex:1;display:none;align-items:center;justify-content:center;padding:1.2rem;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.6rem;width:100%;max-width:380px;box-shadow:0 10px 32px rgba(0,0,0,.12);}
+  .card h1{font-family:'Playfair Display',serif;font-size:1.35rem;margin:0 0 .25rem;color:var(--accent-ink);}
+  .card p{margin:0 0 1.1rem;font-size:.82rem;color:var(--muted);line-height:1.5;}
+  .card label{display:block;font-size:.75rem;font-weight:600;color:var(--muted);margin:.7rem 0 .3rem;}
+  .card input{width:100%;border:1px solid #bba98e;border-radius:7px;padding:.6rem .65rem;font:inherit;font-size:.88rem;}
+  .card button{margin-top:1.1rem;width:100%;background:var(--accent);color:#fff;border:0;border-radius:8px;padding:.7rem;font-weight:700;font-size:.9rem;cursor:pointer;}
+  .card button.secondary{background:#fff;color:var(--accent-ink);border:1px solid #8aa28e;margin-top:.6rem;}
+  .card button:disabled{opacity:.6;cursor:default;}
+  .links{display:flex;justify-content:space-between;gap:.5rem;margin-top:.8rem;font-size:.78rem;}
+  .links a{color:var(--accent-ink);cursor:pointer;text-decoration:underline;}
+  .or{display:flex;align-items:center;gap:.6rem;margin:1.1rem 0 0;font-size:.72rem;color:var(--muted);}
+  .or::before,.or::after{content:'';flex:1;border-top:1px solid var(--line);}
+  .note{margin:.45rem 0 0;font-size:.72rem;color:var(--muted);text-align:center;}
+  .err{display:none;margin-top:.7rem;font-size:.78rem;color:var(--danger);white-space:pre-wrap;}
+  .info{display:none;margin-top:.7rem;font-size:.78rem;color:var(--ok);white-space:pre-wrap;}
+
+  /* Chat */
+  #chatWrap{display:none;flex:1;min-height:0;flex-direction:column;}
+  #banner{display:none;margin:.8rem 1rem 0;padding:.6rem .75rem;border-radius:8px;background:#fff6e5;border:1px solid #ecd6a8;font-size:.78rem;color:#6b4e16;line-height:1.45;}
+  #messages{flex:1;overflow:auto;padding:1rem;display:flex;flex-direction:column;gap:.7rem;}
+  .msg{max-width:88%;border-radius:10px;padding:.7rem .8rem;font-size:.87rem;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;}
+  .msg.user{align-self:flex-end;background:var(--bubble-user);color:#fff;}
+  .msg.ai{align-self:flex-start;background:var(--bubble-ai);color:var(--ink);}
+  #askForm{border-top:1px solid var(--line);padding:.8rem;display:flex;gap:.5rem;background:var(--panel);}
+  #question{flex:1;resize:none;border:1px solid #bba98e;border-radius:7px;padding:.6rem;font:inherit;font-size:.88rem;}
+  #askForm button{align-self:end;background:var(--accent);color:#fff;border:0;border-radius:7px;padding:.62rem .85rem;font-weight:700;cursor:pointer;}
+  #askForm button:disabled{opacity:.6;cursor:default;}
+
+  /* Owner: staff panel */
+  #staffWrap{display:none;flex:1;min-height:0;overflow:auto;padding:1rem;}
+  #staffWrap h2{font-family:'Playfair Display',serif;font-size:1.2rem;margin:0 0 .4rem;color:var(--accent-ink);}
+  .stats{font-size:.78rem;color:var(--muted);margin:0 0 1rem;line-height:1.5;}
+  .user{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.7rem .8rem;margin-bottom:.55rem;display:flex;align-items:center;justify-content:space-between;gap:.6rem;}
+  .user b{font-size:.86rem;display:block;overflow-wrap:anywhere;}
+  .user small{font-size:.72rem;color:var(--muted);overflow-wrap:anywhere;}
+  .pill{display:inline-block;font-size:.66rem;font-weight:700;border-radius:99px;padding:.1rem .45rem;margin-left:.3rem;vertical-align:middle;background:#eee;color:#555;}
+  .pill.staff,.pill.owner{background:#dcebe0;color:var(--accent-ink);}
+  .pill.removed{background:#f6dcd7;color:var(--danger);}
+  .user button{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:.45rem .7rem;font-weight:700;font-size:.75rem;cursor:pointer;white-space:nowrap;}
+  .user button.remove{background:#fff;color:var(--danger);border:1px solid #d9a79d;}
+  @media (max-width:480px){.topbar{padding:.7rem .8rem;}.brand b{font-size:1.02rem;}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><b>✦ Accaza AI</b><small id="brandSub">AI assistant</small></div>
+  <div id="topbarActions">
+    <button id="staffBtn" type="button" style="display:none">Staff</button>
+    <button id="newChatBtn" type="button">New chat</button>
+    <button id="signOutBtn" type="button">Sign out</button>
+  </div>
+</div>
+
+<main>
+  <div class="cardWrap" id="loginWrap">
+    <div class="card">
+      <h1>Sign in to Accaza AI</h1>
+      <p>Sign in with your Accaza AI account, or try it as a guest.</p>
+      <form id="loginForm">
+        <label for="loginEmail">Email</label>
+        <input id="loginEmail" type="email" autocomplete="username" required/>
+        <label for="loginPass">Password</label>
+        <input id="loginPass" type="password" autocomplete="current-password" required/>
+        <button id="loginBtn" type="submit">Log In</button>
+        <div class="err" id="loginErr"></div>
+      </form>
+      <div class="links"><a id="toRegister">Create an account</a><a id="toReset">Forgot password?</a></div>
+      <div class="or">or</div>
+      <button id="guestBtn" class="secondary" type="button">Continue as guest</button>
+      <div class="note">Guests get 10 messages per day.</div>
+    </div>
+  </div>
+
+  <div class="cardWrap" id="registerWrap">
+    <div class="card">
+      <h1>Create an account</h1>
+      <p>New accounts get 10 messages a day. Staff get unlimited chat once the owner approves them.</p>
+      <form id="registerForm">
+        <label for="regName">Your name</label>
+        <input id="regName" type="text" maxlength="60" autocomplete="name" required/>
+        <label for="regEmail">Email</label>
+        <input id="regEmail" type="email" autocomplete="email" required/>
+        <label for="regPass">Password (at least 8 characters)</label>
+        <input id="regPass" type="password" minlength="8" autocomplete="new-password" required/>
+        <label for="regPass2">Confirm password</label>
+        <input id="regPass2" type="password" minlength="8" autocomplete="new-password" required/>
+        <button id="registerBtn" type="submit">Create account</button>
+        <div class="err" id="registerErr"></div>
+      </form>
+      <div class="links"><a class="toLogin">Back to sign in</a></div>
+    </div>
+  </div>
+
+  <div class="cardWrap" id="resetWrap">
+    <div class="card">
+      <h1>Reset your password</h1>
+      <p>Enter your email and we'll send you a link to set a new password.</p>
+      <form id="resetForm">
+        <label for="resetEmail">Email</label>
+        <input id="resetEmail" type="email" autocomplete="email" required/>
+        <button id="resetBtn" type="submit">Send reset link</button>
+        <div class="err" id="resetErr"></div>
+        <div class="info" id="resetInfo"></div>
+      </form>
+      <div class="links"><a class="toLogin">Back to sign in</a></div>
+    </div>
+  </div>
+
+  <div class="cardWrap" id="verifyWrap">
+    <div class="card">
+      <h1>Verify your email</h1>
+      <p id="verifyText">We sent a verification link to your email. Open it, then come back and tap the button below. Check your spam folder if you don't see it.</p>
+      <button id="verifiedBtn" type="button">I've verified</button>
+      <button id="resendBtn" class="secondary" type="button">Resend email</button>
+      <button id="verifySignOutBtn" class="secondary" type="button">Sign out</button>
+      <div class="err" id="verifyErr"></div>
+      <div class="info" id="verifyInfo"></div>
+    </div>
+  </div>
+
+  <div id="chatWrap">
+    <div id="banner"></div>
+    <div id="messages"></div>
+    <form id="askForm">
+      <textarea id="question" maxlength="800" rows="2" placeholder="Ask anything… (Enter to send, Shift+Enter for a new line)" required></textarea>
+      <button id="askBtn" type="submit">Ask</button>
+    </form>
+  </div>
+
+  <div id="staffWrap">
+    <h2>Staff</h2>
+    <div class="stats" id="staffStats">Loading…</div>
+    <div id="staffList"></div>
+  </div>
+</main>
+
+<script type="module">
+import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import{getAuth,onAuthStateChanged,signInWithEmailAndPassword,createUserWithEmailAndPassword,sendEmailVerification,sendPasswordResetEmail,updateProfile,signInAnonymously,signOut,setPersistence,browserLocalPersistence}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import{getFunctions,httpsCallable}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
+import{initializeAppCheck,ReCaptchaEnterpriseProvider}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check.js";
+
+// Firebase project accaza-ai (standalone; not the Accaza Coffee project). Web config is public by design.
+const firebaseConfig={apiKey:"AIzaSyASdgB8qst1tfXFpB9zHBO_bV9YuL4Ymcc",authDomain:"accaza-ai.firebaseapp.com",projectId:"accaza-ai",storageBucket:"accaza-ai.firebasestorage.app",messagingSenderId:"602785905482",appId:"1:602785905482:web:966a768fcb0e606c551fb3"};
+const app=initializeApp(firebaseConfig);
+const APP_CHECK_SITE_KEY='6LfQgM4tAAAAAPDk6bKu9PMGEmGDgwUUCfNLo1pN';
+try{initializeAppCheck(app,{provider:new ReCaptchaEnterpriseProvider(APP_CHECK_SITE_KEY),isTokenAutoRefreshEnabled:true});}catch(e){console.warn('App Check init failed',e);}
+const auth=getAuth(app),functions=getFunctions(app,'asia-southeast1');
+const chatCall=httpsCallable(functions,'chat',{timeout:130000}),accountCall=httpsCallable(functions,'account',{timeout:40000});
+try{await setPersistence(auth,browserLocalPersistence);}catch(_e){}
+
+const by=id=>document.getElementById(id);
+const VIEWS=['loginWrap','registerWrap','resetWrap','verifyWrap','chatWrap','staffWrap'];
+function show(view){VIEWS.forEach(v=>{by(v).style.display=v===view?(v==='chatWrap'?'flex':v==='staffWrap'?'block':'flex'):'none';});by('topbarActions').style.display=(view==='chatWrap'||view==='staffWrap')?'flex':'none';}
+function showMsg(id,text){const el=by(id);el.textContent=text||'';el.style.display=text?'block':'none';}
+function friendly(err){
+  const code=(err&&err.code)||'',map={
+    'auth/invalid-credential':'Wrong email or password.','auth/wrong-password':'Wrong email or password.','auth/user-not-found':'Wrong email or password.',
+    'auth/email-already-in-use':'An account with this email already exists. Sign in instead, or reset the password.',
+    'auth/weak-password':'Use a password of at least 8 characters.','auth/invalid-email':'Enter a valid email address.',
+    'auth/too-many-requests':'Too many attempts. Wait a few minutes and try again.','auth/network-request-failed':'No connection. Check your internet and try again.'};
+  return map[code]||(err&&err.message)||'Something went wrong. Please try again.';
+}
+
+// Chat history lives only in this browser tab (last 8 turns), same as the original app.
+const HISTORY_KEY='accaza_ai_history_v1';
+function history(){try{const raw=JSON.parse(sessionStorage.getItem(HISTORY_KEY)||'[]');return Array.isArray(raw)?raw.slice(-8):[];}catch(e){return [];}}
+function remember(role,text){const items=history();items.push({role:role==='assistant'?'model':'user',text:String(text||'').slice(0,800)});try{sessionStorage.setItem(HISTORY_KEY,JSON.stringify(items.slice(-8)));}catch(e){}}
+function clearHistory(){try{sessionStorage.removeItem(HISTORY_KEY);}catch(e){}}
+function addMessage(role,text){const el=document.createElement('div');el.className='msg '+(role==='user'?'user':'ai');el.textContent=text;by('messages').appendChild(el);el.scrollIntoView({block:'end'});return el;}
+function welcome(){by('messages').replaceChildren();addMessage('assistant','Hi! Ask me anything.');}
+
+// Tier display: owner/staff unlimited; member/guest 10 a day.
+let ME={tier:''};
+function setAllowance(remaining){
+  const t=ME.tier;
+  if(t==='owner'||t==='staff'){by('brandSub').textContent=(t==='owner'?'Owner':'Staff')+' · unlimited';by('banner').style.display='none';return;}
+  const left=remaining==null?'10 messages per day':remaining+' of 10 messages left today';
+  by('brandSub').textContent=(t==='guest'?'Guest · ':'')+left;
+  if(t==='member'){by('banner').textContent='Your account has 10 messages a day. If you are staff, ask the owner to approve your account for unlimited chat.';by('banner').style.display='block';}
+  else by('banner').style.display='none';
+}
+
+async function ask(ev){
+  ev.preventDefault();
+  const input=by('question'),question=(input.value||'').trim();
+  if(!question||by('askBtn').disabled)return;
+  input.value='';by('askBtn').disabled=true;
+  addMessage('user',question);
+  const pending=addMessage('assistant','Thinking…'),slow=setTimeout(()=>{pending.textContent='Still thinking… a backup AI is answering. This can take up to two minutes.';},25000);
+  try{
+    const result=(await chatCall({question,history:history()})).data||{};
+    pending.textContent=result.answer||'No answer came back. Please try again.';
+    remember('user',question);remember('assistant',result.answer||'');
+    if(result.tier)ME.tier=result.tier;
+    setAllowance(result.allowance?result.allowance.remaining:null);
+  }catch(err){
+    pending.textContent=(err&&err.message)||'The AI could not answer right now.';
+    if(err&&err.code==='functions/resource-exhausted'&&err.details&&err.details.limit==='user')setAllowance(0);
+    if(err&&err.code==='functions/failed-precondition'&&/Verify your email/.test(err.message||''))render(auth.currentUser);
+  }finally{clearTimeout(slow);by('askBtn').disabled=false;}
+}
+by('askForm').addEventListener('submit',ask);
+by('question').addEventListener('keydown',ev=>{if(ev.key==='Enter'&&!ev.shiftKey&&!ev.isComposing){ev.preventDefault();if(!by('askBtn').disabled)by('askForm').requestSubmit();}});
+by('newChatBtn').addEventListener('click',()=>{clearHistory();welcome();show('chatWrap');});
+
+// Guest mode is an explicit choice. Leaving guest mode keeps the same anonymous session, so
+// "exit and re-enter" cannot reset a guest's 10 messages.
+const GUEST_KEY='accaza_ai_guest_mode';
+function guestChosen(){try{return localStorage.getItem(GUEST_KEY)==='1';}catch(e){return false;}}
+function setGuestChosen(on){try{if(on)localStorage.setItem(GUEST_KEY,'1');else localStorage.removeItem(GUEST_KEY);}catch(e){}}
+by('guestBtn').addEventListener('click',async()=>{
+  const btn=by('guestBtn');showMsg('loginErr','');btn.disabled=true;btn.textContent='Starting…';
+  try{setGuestChosen(true);if(auth.currentUser&&auth.currentUser.isAnonymous)await render(auth.currentUser);else await signInAnonymously(auth);}
+  catch(e){setGuestChosen(false);showMsg('loginErr','Guest access is unavailable right now. Please try again later.');}
+  finally{btn.disabled=false;btn.textContent='Continue as guest';}
+});
+by('signOutBtn').addEventListener('click',()=>{
+  const user=auth.currentUser;clearHistory();
+  if(user&&user.isAnonymous){setGuestChosen(false);render(user);return;}
+  signOut(auth).catch(()=>{});
+});
+by('verifySignOutBtn').addEventListener('click',()=>signOut(auth).catch(()=>{}));
+
+// Account screens
+let chosenView='';
+by('toRegister').addEventListener('click',()=>{chosenView='register';show('registerWrap');});
+by('toReset').addEventListener('click',()=>{chosenView='reset';by('resetEmail').value=by('loginEmail').value;showMsg('resetErr','');showMsg('resetInfo','');show('resetWrap');});
+document.querySelectorAll('.toLogin').forEach(a=>a.addEventListener('click',()=>{chosenView='';show('loginWrap');}));
+
+by('loginForm').addEventListener('submit',async ev=>{
+  ev.preventDefault();
+  const btn=by('loginBtn');showMsg('loginErr','');btn.disabled=true;btn.textContent='Signing in…';
+  try{setGuestChosen(false);await signInWithEmailAndPassword(auth,(by('loginEmail').value||'').trim(),by('loginPass').value);}
+  catch(e){showMsg('loginErr',friendly(e));by('loginPass').value='';}
+  finally{btn.disabled=false;btn.textContent='Log In';}
+});
+by('registerForm').addEventListener('submit',async ev=>{
+  ev.preventDefault();
+  const name=(by('regName').value||'').trim(),email=(by('regEmail').value||'').trim(),pass=by('regPass').value,btn=by('registerBtn');
+  showMsg('registerErr','');
+  if(pass!==by('regPass2').value){showMsg('registerErr','The two passwords do not match.');return;}
+  if(pass.length<8){showMsg('registerErr','Use a password of at least 8 characters.');return;}
+  btn.disabled=true;btn.textContent='Creating…';
+  try{
+    setGuestChosen(false);chosenView='';
+    const cred=await createUserWithEmailAndPassword(auth,email,pass);
+    await updateProfile(cred.user,{displayName:name}).catch(()=>{});
+    await sendEmailVerification(cred.user).catch(()=>{});
+    await accountCall({action:'me',name}).catch(()=>{});
+    render(cred.user);
+  }catch(e){showMsg('registerErr',friendly(e));}
+  finally{btn.disabled=false;btn.textContent='Create account';}
+});
+by('resetForm').addEventListener('submit',async ev=>{
+  ev.preventDefault();
+  const btn=by('resetBtn');showMsg('resetErr','');showMsg('resetInfo','');btn.disabled=true;
+  try{await sendPasswordResetEmail(auth,(by('resetEmail').value||'').trim());}catch(e){if(e&&e.code==='auth/invalid-email'){showMsg('resetErr',friendly(e));btn.disabled=false;return;}}
+  showMsg('resetInfo','If an account exists for that email, a reset link is on its way. Check your spam folder too.');btn.disabled=false;
+});
+by('verifiedBtn').addEventListener('click',async()=>{
+  const user=auth.currentUser;showMsg('verifyErr','');showMsg('verifyInfo','');if(!user)return;
+  await user.reload().catch(()=>{});
+  if(!auth.currentUser.emailVerified){showMsg('verifyErr','Not verified yet. Open the link in the email first, then tap this again.');return;}
+  await auth.currentUser.getIdToken(true).catch(()=>{});
+  render(auth.currentUser);
+});
+by('resendBtn').addEventListener('click',async()=>{
+  showMsg('verifyErr','');showMsg('verifyInfo','');
+  try{await sendEmailVerification(auth.currentUser);showMsg('verifyInfo','Sent. Check your inbox and spam folder.');}catch(e){showMsg('verifyErr',friendly(e));}
+});
+
+// Owner: approve or remove staff
+async function loadStaff(){
+  by('staffStats').textContent='Loading…';by('staffList').replaceChildren();
+  try{
+    const data=(await accountCall({action:'list'})).data||{},t=data.today||{};
+    const backups=Object.entries(t.backupAnswers||{}).map(([k,v])=>k+' '+v).join(', ')||'none';
+    by('staffStats').textContent=`Today (${t.day}): ${t.limitedMessages||0} of ${t.sharedLimit||100} guest/member messages used. Backup AI answers: ${backups}. Unanswered questions: ${t.failedQuestions||0}.`;
+    (data.users||[]).forEach(u=>{
+      const row=document.createElement('div');row.className='user';
+      const info=document.createElement('div'),title=document.createElement('b'),sub=document.createElement('small'),pill=document.createElement('span');
+      const label=u.role==='owner'?'owner':u.role==='staff'?'staff':u.status==='removed'?'removed':'member';
+      title.textContent=u.name||u.email;pill.className='pill '+label;pill.textContent=label;title.appendChild(pill);
+      sub.textContent=u.email+(u.createdAt?' · joined '+new Date(u.createdAt).toLocaleDateString():'');
+      info.append(title,sub);row.appendChild(info);
+      if(u.role!=='owner'){
+        const btn=document.createElement('button'),approve=u.role!=='staff';
+        btn.textContent=approve?'Approve as staff':'Remove staff';if(!approve)btn.className='remove';
+        btn.addEventListener('click',async()=>{btn.disabled=true;try{await accountCall({action:approve?'approve':'remove',uid:u.uid});await loadStaff();}catch(e){btn.disabled=false;alert((e&&e.message)||'Could not update this account.');}});
+        row.appendChild(btn);
+      }
+      by('staffList').appendChild(row);
+    });
+    if(!(data.users||[]).length)by('staffList').textContent='No accounts yet.';
+  }catch(e){by('staffStats').textContent=(e&&e.message)||'Could not load accounts.';}
+}
+by('staffBtn').addEventListener('click',()=>{if(by('staffWrap').style.display==='block'){show('chatWrap');by('staffBtn').textContent='Staff';}else{show('staffWrap');by('staffBtn').textContent='Back to chat';loadStaff();}});
+
+let renderSeq=0,lastUid='';
+async function render(user){
+  const seq=++renderSeq;
+  if(!user||(user.isAnonymous&&!guestChosen())){
+    ME={tier:''};lastUid='';by('brandSub').textContent='AI assistant';by('staffBtn').style.display='none';
+    show(chosenView==='register'?'registerWrap':chosenView==='reset'?'resetWrap':'loginWrap');return;
+  }
+  if(!user.isAnonymous&&!user.emailVerified){
+    by('verifyText').textContent='We sent a verification link to '+(user.email||'your email')+'. Open it, then come back and tap the button below. Check your spam folder if you don\'t see it.';
+    by('brandSub').textContent='Verify your email';show('verifyWrap');return;
+  }
+  if(user.uid!==lastUid){clearHistory();lastUid=user.uid;}
+  by('signOutBtn').textContent=user.isAnonymous?'Exit guest':'Sign out';
+  by('staffBtn').style.display='none';by('staffBtn').textContent='Staff';
+  ME={tier:user.isAnonymous?'guest':'member'};setAllowance(null);show('chatWrap');welcome();
+  try{
+    const me=(await accountCall({action:'me'})).data||{};if(seq!==renderSeq)return;
+    if(me.tier==='unverified'){show('verifyWrap');return;}
+    ME=me;setAllowance(me.remaining);
+    if(me.tier==='owner')by('staffBtn').style.display='inline-block';
+  }catch(e){console.warn('account check failed',e);}
+}
+onAuthStateChanged(auth,render);
+
+if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js',{scope:'/'}).then(r=>r.update()).catch(()=>{});});}
+</script>
+</body>
+</html>
