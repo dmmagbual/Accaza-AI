@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'"/>
-<meta name="accaza-ai-build" content="5"/>
+<meta name="accaza-ai-build" content="6"/>
 <meta name="description" content="Accaza AI — a general-chat AI assistant."/>
 <meta name="theme-color" content="#19241b"/>
 <title>Accaza AI</title>
@@ -353,6 +353,8 @@ function friendly(err){
     'auth/too-many-requests':'Too many attempts. Wait a few minutes and try again.','auth/network-request-failed':'No connection. Check your internet and try again.'};
   return map[code]||(err&&err.message)||'Something went wrong. Please try again.';
 }
+// Server messages are written for people; drop transport details such as a trailing " [400]".
+function cleanErr(err,fallback){return String((err&&err.message)||fallback).replace(/\s*\[\d{3}\]\s*$/,'')||fallback;}
 function openSide(){document.body.classList.add('sideOpen');}
 function closeSide(){document.body.classList.remove('sideOpen');}
 by('menuBtn').addEventListener('click',()=>document.body.classList.contains('sideOpen')?closeSide():openSide());
@@ -490,7 +492,7 @@ async function send(mode){
     if(controller.signal.aborted){
       ai.pending=false;ai.text=(text?text+'\n\n':'')+'*Stopped.*';paint(ai.bubble,ai.text,false);ai.bubble.classList.remove('pending');
     }else{
-      ai.pending=false;ai.error=true;ai.text=(err&&err.message)||'The AI could not answer right now.';
+      ai.pending=false;ai.error=true;ai.text=cleanErr(err,'The AI could not answer right now.');
       ai.bubble.className='bubble error';ai.bubble.textContent=ai.text;
       if(err&&err.code==='functions/resource-exhausted'&&err.details&&err.details.limit==='user')setAllowance(0);
       if(err&&err.code==='functions/failed-precondition'&&/Verify your email/.test(err.message||''))render(auth.currentUser);
@@ -616,7 +618,7 @@ async function addFiles(list){
       p.size=blob.size;p.mimeType=finalType;
       const res=(await uploadCall({name:p.name,mimeType:finalType,base64:await toBase64(blob)})).data||{};
       Object.assign(p,{id:res.id,expiresAt:res.expiresAt,status:'ready',name:res.displayName||p.name});
-    }catch(err){p.status='error';p.error=(err&&err.message)||'Upload failed.';}
+    }catch(err){p.status='error';p.error=cleanErr(err,'Upload failed.');}
     if(pending.includes(p))renderChips();
   }
 }
