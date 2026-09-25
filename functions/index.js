@@ -20,10 +20,12 @@ const Google = require("./lib/google");
 const Mcp = require("./lib/mcp");
 const Models = require("./lib/models");
 const Canvas = require("./lib/canvas");
+const Tasks = require("./lib/tasks");
+const {getStorage} = require("firebase-admin/storage");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.8";
+const RELEASE_VERSION = "1.9";
 const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
@@ -256,8 +258,8 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
     chats: async () => ({chats: await Chats.listChats(db, actor.uid)}),
     messages: () => Chats.listMessages(db, actor.uid, data.chatId),
     renameChat: () => Chats.renameChat(db, actor.uid, data.chatId, data.title),
-    deleteChat: async () => { const out = await Chats.deleteChat(db, actor.uid, data.chatId); out.filesDeleted = await purgeUploads(db, actor.uid, out.fileIds); delete out.fileIds; return out; },
-    deleteAllChats: async () => { const out = await Chats.deleteAllChats(db, actor.uid); out.filesDeleted = await purgeUploads(db, actor.uid, null); return out; },
+    deleteChat: async () => { const out = await Chats.deleteChat(db, actor.uid, data.chatId); out.filesDeleted = await purgeUploads(db, actor.uid, out.fileIds); delete out.fileIds; out.tasksDeleted = await Tasks.deleteTasks(db, taskBucket(), actor.uid, out.deleted); return out; },
+    deleteAllChats: async () => { const out = await Chats.deleteAllChats(db, actor.uid); out.filesDeleted = await purgeUploads(db, actor.uid, null); out.tasksDeleted = await Tasks.deleteTasks(db, taskBucket(), actor.uid, null); return out; },
     getSettings: async () => ({settings: await Memory.loadSettings(db, actor.uid), memories: await Memory.listMemories(db, actor.uid)}),
     saveSettings: async () => ({settings: await Memory.saveSettings(db, actor.uid, data.settings || {}, now)}),
     addMemory: () => Memory.addMemory(db, actor.uid, data.text, now),
@@ -344,6 +346,26 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
     return {ok: true, uid, role: patch.role, status: patch.status};
   }
   throw new HttpsError("invalid-argument", "Unknown action.");
+});
+
+// Laptop tasks (owner only): long, multi-step jobs that the worker on the owner's laptop runs in a
+// Docker sandbox (code, files, web research). This callable only queues, reports and controls
+// them; see lib/tasks.js and worker/.
+function taskBucket() { return getStorage().bucket(Tasks.BUCKET); }
+exports.tasks = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "512MiB"}, async request => {
+  const db = getFirestore(), actor = await Access.resolveAccount(db, request.auth), data = request.data || {}, action = AI.cleanText(data.action, 20), now = Date.now();
+  if (actor.tier !== "owner") throw new HttpsError("permission-denied", "Tasks run on the owner's laptop and are available to the owner only.");
+  switch (action) {
+    case "create": return Tasks.createTask({db, bucket: taskBucket(), account: actor, data, now, Chats});
+    case "list": return Tasks.listTasks(db, actor.uid, now);
+    case "get": return Tasks.getTask(db, actor.uid, data.taskId, data.since, now);
+    case "stop": return Tasks.stopTask(db, actor.uid, data.taskId, now);
+    case "reply": return Tasks.replyTask(db, actor.uid, data.taskId, data.text, now);
+    case "file": return Tasks.downloadFile(db, taskBucket(), actor.uid, data.taskId, data.which === "inputs" ? "inputs" : "outputs", data.name);
+    case "delete": return Tasks.deleteTask(db, taskBucket(), actor.uid, data.taskId);
+    case "worker": return {worker: await Tasks.workerStatus(db, now)};
+    default: throw new HttpsError("invalid-argument", "Unknown action.");
+  }
 });
 
 // Google OAuth redirect (https://accaza-ai.web.app/oauth/google, via a Hosting rewrite).

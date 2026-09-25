@@ -6,6 +6,22 @@
       "fields": [
         {"fieldPath": "embedding", "vectorConfig": {"dimension": 768, "flat": {}}}
       ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "uid", "order": "ASCENDING"},
+        {"fieldPath": "createdAt", "order": "DESCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "tasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "uid", "order": "ASCENDING"},
+        {"fieldPath": "status", "order": "ASCENDING"}
+      ]
     }
   ],
   "fieldOverrides": [
