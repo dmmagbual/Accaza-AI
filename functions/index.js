@@ -10,10 +10,12 @@ const {initializeApp} = require("firebase-admin/app");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const AI = require("./lib/providers");
 const Access = require("./lib/access");
+const Chats = require("./lib/chats");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.0";
+const RELEASE_VERSION = "1.1";
+const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const GROQ_API_KEY = defineSecret("GROQ_API_KEY");
@@ -42,22 +44,42 @@ async function recordProviderHealth(db, surface, answeredBy, failures) {
   } catch (_error) { /* monitoring must never block or fail an answer */ }
 }
 
-exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256MiB", secrets: AI_SECRETS}, async request => {
-  const db = getFirestore(), account = await Access.resolveAccount(db, request.auth);
-  const question = AI.cleanText(request.data && request.data.question, 800), history = AI.chatHistory(request.data && request.data.history);
+// One chat turn. Streams the reply (chunks {delta} and, when a provider fails mid-reply and the
+// next one takes over, {reset}) and returns the finished answer. Registered users' turns are
+// saved to their chats; guests send their own short history from the browser tab.
+exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256MiB", secrets: AI_SECRETS}, async (request, response) => {
+  const db = getFirestore(), account = await Access.resolveAccount(db, request.auth), data = request.data || {};
+  const mode = ["regenerate", "edit"].includes(data.mode) ? data.mode : "new", saves = account.tier !== "guest";
+  let question = AI.cleanMultiline(data.question, QUESTION_CHARS), chat = null, plan;
+  if (saves) {
+    if (data.chatId) chat = await Chats.requireChat(db, account.uid, data.chatId);
+    else if (mode !== "new") throw new HttpsError("failed-precondition", "There is no answer to redo in this chat.");
+    const messages = chat ? await Chats.recentMessages(chat.ref) : [];
+    plan = Chats.planTurn(messages, mode, question);
+  } else {
+    if (mode !== "new") throw new HttpsError("failed-precondition", "Sign in to regenerate or edit answers.");
+    plan = {question, history: AI.chatHistory(data.history), remove: [], keepUser: null};
+  }
+  question = plan.question;
   if (question.length < 2) throw new HttpsError("invalid-argument", "Type a question first.");
   const now = Date.now(), day = Access.manilaDay(now), limited = !Access.unlimited(account.tier);
   const allowance = limited ? await Access.claimMessage(db, account.uid, day, now) : null;
+  const history = plan.history.map(message => ({role: message.role, text: message.text}));
   let result;
   try {
-    result = await AI.withFallback(AI.generalChatProviders(question, history, KEYS), (answeredBy, failures) => recordProviderHealth(db, account.tier, answeredBy, failures));
+    result = await AI.withFallback(AI.generalChatProviders(question, history, KEYS, account.tier), {
+      onDelta: piece => { response.sendChunk({delta: piece}).catch(() => {}); },
+      onReset: () => { response.sendChunk({reset: true}).catch(() => {}); },
+      onUnusual: (answeredBy, failures) => recordProviderHealth(db, account.tier, answeredBy, failures),
+    });
   } catch (error) {
     if (limited) await Access.releaseMessage(db, account.uid, day);
     throw error;
   }
-  // The log keeps who asked, which AI answered and a hash of the question, never the text.
-  await db.collection("chatLog").add({at: now, day, uid: account.uid, tier: account.tier, provider: result.provider, backupsTried: result.failures.length, questionHash: crypto.createHash("sha256").update(question).digest("hex"), used: allowance ? allowance.used : null});
-  return {answer: result.answer, sources: [], provider: result.provider, tier: account.tier, allowance, releaseVersion: RELEASE_VERSION};
+  const saved = saves ? await Chats.saveTurn(db, account.uid, chat, plan, result, now) : null;
+  // The analytics log keeps who asked, which AI answered and a hash of the question, never the text.
+  await db.collection("chatLog").add({at: now, day, uid: account.uid, tier: account.tier, mode, provider: result.provider, model: result.model, backupsTried: result.failures.length, questionHash: crypto.createHash("sha256").update(question).digest("hex"), used: allowance ? allowance.used : null});
+  return {answer: result.answer, provider: result.provider, model: result.model, tier: account.tier, allowance, chatId: saved && saved.chatId, title: saved && saved.title, userMessageId: saved && saved.userMessageId, modelMessageId: saved && saved.modelMessageId, releaseVersion: RELEASE_VERSION};
 });
 
 // Account actions. "me" registers the caller on first use and reports their tier and today's
@@ -82,11 +104,23 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 30, memory: "25
     }
     if (!verified) return {tier: "unverified", emailVerified: false, email, name};
     const account = await Access.resolveAccount(db, auth);
-    if (Access.unlimited(account.tier)) return {tier: account.tier, emailVerified: true, email, name, limit: null, remaining: null};
+    if (Access.unlimited(account.tier)) return {tier: account.tier, emailVerified: true, email, name, limit: null, remaining: null, model: AI.GEMINI.strong.model};
     const used = await Access.usedToday(db, auth.uid, day);
     return {tier: account.tier, emailVerified: true, email, name, limit: Access.DAILY_LIMIT, remaining: Math.max(0, Access.DAILY_LIMIT - used), pendingApproval: true};
   }
   const actor = await Access.resolveAccount(db, auth);
+  // Saved chats: any registered, verified account, always scoped to the caller's own uid.
+  const chatActions = {
+    chats: async () => ({chats: await Chats.listChats(db, actor.uid)}),
+    messages: () => Chats.listMessages(db, actor.uid, data.chatId),
+    renameChat: () => Chats.renameChat(db, actor.uid, data.chatId, data.title),
+    deleteChat: () => Chats.deleteChat(db, actor.uid, data.chatId),
+    deleteAllChats: () => Chats.deleteAllChats(db, actor.uid),
+  };
+  if (chatActions[action]) {
+    if (actor.tier === "guest") throw new HttpsError("failed-precondition", "Sign in to save and open chats.");
+    return chatActions[action]();
+  }
   if (actor.tier !== "owner") throw new HttpsError("permission-denied", "Only the owner can manage staff.");
   if (action === "list") {
     const [usersSnap, usageSnap, healthSnap] = await Promise.all([db.collection("users").orderBy("createdAt", "desc").limit(200).get(), db.collection("usage").doc(day).get(), db.collection("providerHealth").doc(day).get()]);
