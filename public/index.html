@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'"/>
-<meta name="accaza-ai-build" content="3"/>
+<meta name="accaza-ai-build" content="4"/>
 <meta name="description" content="Accaza AI — a general-chat AI assistant."/>
 <meta name="theme-color" content="#19241b"/>
 <title>Accaza AI</title>
@@ -430,14 +430,14 @@ async function send(mode){
   const draw=()=>{
     frame=0;if(shown>text.length)shown=0;
     if(shown<text.length){shown+=Math.max(2,Math.ceil((text.length-shown)/12));ai.bubble.classList.remove('pending');paint(ai.bubble,text.slice(0,shown),true);toBottom(false);}
-    if(shown<text.length)frame=requestAnimationFrame(draw);
+    if(shown<text.length)frame=setTimeout(draw,16);
   };
   const payload=saves()?{question,mode,chatId:current&&current.id}:{question,history,mode:'new'};
   try{
     const {stream,data}=await chatCall.stream(payload,{signal:controller.signal});
     for await(const chunk of stream){
       if(chunk&&chunk.reset){text='';shown=0;}else if(chunk&&chunk.delta)text+=chunk.delta;
-      if(!frame)frame=requestAnimationFrame(draw);
+      if(!frame)frame=setTimeout(draw,16);
     }
     const result=await data;
     // Let the typing animation finish (at most about a second) before the final render.
@@ -460,7 +460,7 @@ async function send(mode){
       if(saves()&&mode!=='new'&&current)setTimeout(()=>openChat(current.id,true),1500);
     }
   }finally{
-    clearTimeout(slow);if(frame)cancelAnimationFrame(frame);controller=null;setBusy(false);saveGuestTurns();toBottom(false);
+    clearTimeout(slow);if(frame)clearTimeout(frame);controller=null;setBusy(false);saveGuestTurns();toBottom(false);
   }
 }
 
