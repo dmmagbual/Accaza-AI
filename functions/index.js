@@ -18,10 +18,11 @@ const {combineTools} = require("./lib/tools");
 const Web = require("./lib/websearch");
 const Google = require("./lib/google");
 const Mcp = require("./lib/mcp");
+const Models = require("./lib/models");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.6";
+const RELEASE_VERSION = "1.7";
 const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
@@ -175,9 +176,13 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256M
   const today = `Today's date in Manila is ${Access.manilaDay(now)}.`;
   const system = [today, Web.GUIDE, connectorNote, saves ? Memory.personalBlock(settings, memories) : "", Skills.catalogBlock(skills, pinned)].filter(Boolean).join("\n\n");
   const toolsUsed = [];
-  let result;
+  let result, picked = null;
   try {
-    result = await AI.withFallback(AI.generalChatProviders({question, history, keys: KEYS, tier: account.tier, files, system, tools}), {
+    // Model menu: "auto" keeps the normal chain; a picked model goes first with the chain behind it.
+    const req = {question, history, keys: KEYS, tier: account.tier, files, system, tools};
+    picked = await Models.resolvePick(db, data.model, account.tier, req, googleConfig().tokenKey, day, now);
+    if (picked) req.chosen = picked.provider;
+    result = await AI.withFallback(AI.generalChatProviders(req), {
       onEvent: event => {
         if (!event || event.type !== "tool" || !tools) return;
         const label = tools.label(event.name, event.args);
@@ -193,6 +198,8 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256M
     throw error;
   }
   result.sources = sources;
+  const labelOf = name => { const b = Models.BUILTINS.find(m => m.id === name); return b ? b.label : picked && picked.provider.name === name ? picked.label : name; };
+  const modelNote = picked && result.provider !== picked.provider.name ? `${picked.label} was unavailable, so ${labelOf(result.provider)} answered.` : (picked && (files.length && !picked.provider.files) ? `${picked.label} cannot read files, so ${labelOf(result.provider)} answered.` : "");
   const saved = saves ? await Chats.saveTurn(db, account.uid, chat, plan, result, now) : null;
   // Learn from this exchange (never blocks or fails the answer).
   let memory = null;
@@ -202,7 +209,7 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256M
   }
   // The analytics log keeps who asked, which AI answered and a hash of the question, never the text.
   await db.collection("chatLog").add({at: now, day, uid: account.uid, tier: account.tier, mode, files: files.length, provider: result.provider, model: result.model, backupsTried: result.failures.length, questionHash: crypto.createHash("sha256").update(question).digest("hex"), used: allowance ? allowance.used : null});
-  return {answer: result.answer, provider: result.provider, model: result.model, tier: account.tier, allowance, attachments: files.map(Files.publicFile), memory, sources, tools: toolsUsed.slice(0, 12), skill: pinned ? {id: pinned.id, name: pinned.name} : null, chatId: saved && saved.chatId, title: saved && saved.title, userMessageId: saved && saved.userMessageId, modelMessageId: saved && saved.modelMessageId, releaseVersion: RELEASE_VERSION};
+  return {answer: result.answer, provider: result.provider, model: result.model, tier: account.tier, allowance, attachments: files.map(Files.publicFile), memory, sources, modelNote, answeredBy: labelOf(result.provider), tools: toolsUsed.slice(0, 12), skill: pinned ? {id: pinned.id, name: pinned.name} : null, chatId: saved && saved.chatId, title: saved && saved.title, userMessageId: saved && saved.userMessageId, modelMessageId: saved && saved.modelMessageId, releaseVersion: RELEASE_VERSION};
 });
 
 // Account actions. "me" registers the caller on first use and reports their tier and today's
@@ -258,6 +265,17 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
     mcpAdd: () => Mcp.addConnector(db, actor.uid, data, googleConfig().tokenKey, now),
     mcpRemove: async () => { const id = String(data.connectorId || ""); if (!/^mcp_[a-f0-9]{10}$/.test(id)) throw new HttpsError("invalid-argument", "Connector not found."); await db.collection("users").doc(actor.uid).collection("connectors").doc(id).delete(); return {removed: id}; },
   };
+  // Model menu (everyone) and owner-added models (owner only).
+  if (action === "models") return {models: await Models.menu(db, actor.tier)};
+  const modelActions = {
+    modelList: async () => ({models: await Models.listModels(db), providers: Object.entries(Models.PROVIDERS).map(([id, p]) => ({id, label: p.label, format: p.format, baseUrl: p.baseUrl}))}),
+    modelSave: () => Models.saveModel(db, data, googleConfig().tokenKey, actor.uid, now),
+    modelDelete: () => Models.deleteModel(db, data.modelId),
+  };
+  if (modelActions[action]) {
+    if (actor.tier !== "owner") throw new HttpsError("permission-denied", "Only the owner can add or change models.");
+    return modelActions[action]();
+  }
   if (connectorActions[action]) {
     if (!CONNECTOR_TIERS.includes(actor.tier)) throw new HttpsError("permission-denied", "Connectors are available to the owner and approved staff.");
     return connectorActions[action]();

@@ -41,6 +41,14 @@ Live at **https://accaza-ai.web.app**.
     - Only tools marked read-only are used, unless "Allow actions that change things" is ticked.
     - SSRF-guarded.
   - Content from connected apps is treated as data, never as instructions.
+- **Model menu** next to the message box. **Auto** is the normal chain, or pick a model:
+  - Owner/staff can pick any built-in model. Members and guests can pick Flash-Lite, Groq, Cerebras or DeepSeek.
+  - The picked model goes first, with the Auto chain behind it. A note appears when a backup answered, or when the picked model can't read an attached file.
+  - The choice is remembered per chat.
+- **Owner-added models** (Settings → Models):
+  - Supported: any OpenAI-compatible provider (OpenAI, OpenRouter, Mistral, xAI, Together, Fireworks, Groq, DeepSeek, Cerebras, or a custom https address), Anthropic (Claude) and Google Gemini.
+  - Each added model is tested before it's saved. The key is stored AES-256-GCM encrypted in `models/{id}`.
+  - Each has an audience (only me / staff / everyone) and an optional daily cap (`modelUsage/{day}`).
 - **Saved chats** in a sidebar for registered users (owner, staff, members), with rename, delete and delete all. Guests' chats stay in their browser tab only.
 - Models:
   - Owner and staff start on **Gemini 3.8 Flash**, then **Flash-Lite**.
@@ -68,6 +76,7 @@ Live at **https://accaza-ai.web.app**.
 - `functions/lib/skills.js` and `functions/lib/tools.js`: skill storage, ingestion, retrieval tools, and the tool combiner.
 - `functions/lib/websearch.js` and `functions/lib/netguard.js`: web tools and the safe fetch.
 - `functions/lib/google.js`, `functions/lib/mcp.js` and `functions/lib/crypto.js`: connectors and token encryption.
+- `functions/lib/models.js`: model menu, added models, test-before-save, caps.
 - `functions/lib/chats.js`: saved chats (create, regenerate, edit, list, rename, delete).
 - `firestore.rules`: browsers get no direct database access. Everything goes through the functions.
 - `tests/server.test.js`: unit tests.
