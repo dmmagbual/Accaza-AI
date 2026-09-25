@@ -376,3 +376,76 @@ test("open_url refuses private addresses and non-page files", async () => {
   assert.match((await tools.run("open_url", {url: "http://10.0.0.1/"})).error, /not allowed/);
   assert.match((await tools.run("open_url", {url: "https://x.example/a.zip"})).error, /not a web page/);
 });
+
+// ---------- Connectors ----------
+const Crypto = require("../functions/lib/crypto");
+const Google = require("../functions/lib/google");
+const Mcp = require("../functions/lib/mcp");
+const KEY = Buffer.alloc(32, 7).toString("base64");
+test("tokens are encrypted with AES-GCM and tampering is detected", () => {
+  const enc = Crypto.encrypt("refresh-123", KEY);
+  assert.doesNotMatch(enc, /refresh-123/); assert.equal(Crypto.decrypt(enc, KEY), "refresh-123");
+  const parts = enc.split("."); parts[3] = Buffer.from("x").toString("base64url");
+  assert.throws(() => Crypto.decrypt(parts.join("."), KEY));
+  assert.throws(() => Crypto.encrypt("x", "short"), /not configured/);
+});
+function stateDb() {
+  const store = {};
+  return {store, collection: name => ({doc: id => ({get: async () => ({exists: Boolean(store[name + "/" + id]), data: () => store[name + "/" + id]}), set: async v => { store[name + "/" + id] = v; }, delete: async () => { delete store[name + "/" + id]; }, collection: sub => ({doc: sid => ({set: async v => { store[`${name}/${id}/${sub}/${sid}`] = v; }})})})})};
+}
+test("Google sign-in uses PKCE, read-only scopes and a one-time state", async () => {
+  const db = stateDb();
+  const {url} = await Google.startAuth(db, "u1", ["drive", "gmail", "bogus"], "id.apps.googleusercontent.com", 1000);
+  const u = new URL(url), state = u.searchParams.get("state");
+  assert.equal(u.searchParams.get("code_challenge_method"), "S256");
+  assert.match(u.searchParams.get("scope"), /drive\.readonly/); assert.match(u.searchParams.get("scope"), /gmail\.readonly/); assert.doesNotMatch(u.searchParams.get("scope"), /calendar/);
+  assert.equal(u.searchParams.get("redirect_uri"), "https://accaza-ai.web.app/oauth/google");
+  const idToken = "x." + Buffer.from(JSON.stringify({email: "d@x.com"})).toString("base64url") + ".y";
+  const fetchImpl = async () => ({ok: true, json: async () => ({refresh_token: "r1", id_token: idToken, scope: "openid https://www.googleapis.com/auth/drive.readonly"})});
+  const cfg = {clientId: "id.apps.googleusercontent.com", clientSecret: "s", tokenKey: KEY};
+  assert.equal(await Google.finishAuth(db, {state, code: "c"}, cfg, 2000, fetchImpl), "/?connector=google&status=connected");
+  const saved = db.store["users/u1/connectors/google"];
+  assert.deepEqual(saved.services, ["drive"]); assert.equal(saved.email, "d@x.com"); assert.equal(Crypto.decrypt(saved.refreshTokenEnc, KEY), "r1");
+  assert.equal(await Google.finishAuth(db, {state, code: "c"}, cfg, 3000, fetchImpl), "/?connector=google&status=expired");
+});
+test("an old Google state is refused", async () => {
+  const db = stateDb();
+  const {url} = await Google.startAuth(db, "u1", ["calendar"], "id.apps.googleusercontent.com", 0);
+  const state = new URL(url).searchParams.get("state");
+  assert.equal(await Google.finishAuth(db, {state, code: "c"}, {clientId: "i", clientSecret: "s", tokenKey: KEY}, 11 * 60 * 1000, async () => { throw new Error("no"); }), "/?connector=google&status=expired");
+  assert.equal(Google.configured("unset", "unset"), false);
+});
+test("Google tools match the granted services and escape Drive queries", async () => {
+  const conn = {services: ["drive"], refreshTokenEnc: Crypto.encrypt("r", KEY)}, urls = [];
+  const fetchImpl = async (url) => { urls.push(String(url)); if (/oauth2/.test(url)) return {ok: true, json: async () => ({access_token: "a"})}; return {ok: true, json: async () => ({files: [{id: "f1", name: "Menu"}]})}; };
+  const tools = Google.googleTools(conn, {clientId: "i", clientSecret: "s", tokenKey: KEY}, fetchImpl);
+  assert.deepEqual(tools.declarations.map(d => d.name), ["drive_search", "drive_read"]);
+  const out = await tools.run("drive_search", {query: "menu' or 'x"});
+  assert.equal(out.files[0].id, "f1");
+  assert.doesNotMatch(decodeURIComponent(urls[1]), /menu' or 'x/);
+  assert.equal(Google.googleTools({services: []}, {}), null);
+});
+test("MCP replies parse from JSON or SSE", () => {
+  assert.deepEqual(Mcp.parseRpc('{"jsonrpc":"2.0","id":1,"result":{"ok":1}}', "application/json", 1), {ok: 1});
+  assert.deepEqual(Mcp.parseRpc('event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"tools":[]}}\n\n', "text/event-stream", 2), {tools: []});
+  assert.throws(() => Mcp.parseRpc('{"jsonrpc":"2.0","id":3,"error":{"message":"bad"}}', "application/json", 3), /bad/);
+});
+test("MCP client keeps the session, sends the token, and only read-only tools are offered by default", async () => {
+  const seen = [];
+  const fetchImpl = async (url, opts) => {
+    const body = JSON.parse(opts.body); seen.push({method: body.method, headers: opts.headers});
+    const h = new Map([["mcp-session-id", "S1"]]);
+    if (body.method === "initialize") return {status: 200, contentType: "application/json", headers: {get: k => h.get(k)}, text: JSON.stringify({jsonrpc: "2.0", id: body.id, result: {}})};
+    if (body.method === "tools/call") return {status: 200, contentType: "application/json", headers: {get: () => null}, text: JSON.stringify({jsonrpc: "2.0", id: body.id, result: {content: [{type: "text", text: "3 open issues"}]}})};
+    return {status: 202, contentType: "", headers: {get: () => null}, text: ""};
+  };
+  const conn = {name: "Tracker", url: "https://mcp.example.com", tokenEnc: Crypto.encrypt("tok", KEY), headerName: "authorization", tools: [{name: "list_issues", description: "List", inputSchema: {type: "object", properties: {state: {type: ["string", "null"], pattern: "x"}}}, readOnly: true}, {name: "delete_issue", description: "Delete", inputSchema: {type: "object"}, readOnly: false}]};
+  const tools = Mcp.mcpTools([conn], KEY, fetchImpl);
+  assert.deepEqual(tools.declarations.map(d => d.name), ["tracker__list_issues"]);
+  assert.deepEqual(tools.declarations[0].parameters.properties.state, {type: "string"});
+  const out = await tools.run("tracker__list_issues", {});
+  assert.equal(out.text, "3 open issues");
+  assert.equal(seen[0].headers.authorization, "Bearer tok");
+  assert.equal(seen.at(-1).headers["mcp-session-id"], "S1");
+  assert.deepEqual(Mcp.mcpTools([Object.assign({}, conn, {allowWrites: true})], KEY, fetchImpl).declarations.map(d => d.name), ["tracker__list_issues", "tracker__delete_issue"]);
+});

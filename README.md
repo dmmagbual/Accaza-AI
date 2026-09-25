@@ -32,6 +32,15 @@ Live at **https://accaza-ai.web.app**.
   - `open_url` reads a link. It's SSRF-guarded: no private addresses, and every redirect is re-checked.
   - Sources show under the answer and are saved with the chat.
   - Daily caps: 5 searches per member/guest, 60 per owner/staff, 150 in total, to stay inside the 5,000-a-month free allowance.
+- **Connectors** (owner and approved staff), under Settings → Connectors:
+  - **Google Drive, Gmail and Calendar, read-only.**
+    - Sign-in uses OAuth with PKCE. The refresh token is stored AES-256-GCM encrypted with the `CONNECTOR_TOKEN_KEY` secret.
+    - Tools: `drive_search`, `drive_read`, `gmail_search`, `gmail_read`, `calendar_events`.
+    - Needs a Google OAuth client (see "Google connector setup").
+  - **MCP servers** (Streamable HTTP), added by URL plus an optional token (stored encrypted).
+    - Only tools marked read-only are used, unless "Allow actions that change things" is ticked.
+    - SSRF-guarded.
+  - Content from connected apps is treated as data, never as instructions.
 - **Saved chats** in a sidebar for registered users (owner, staff, members), with rename, delete and delete all. Guests' chats stay in their browser tab only.
 - Models:
   - Owner and staff start on **Gemini 3.8 Flash**, then **Flash-Lite**.
@@ -58,6 +67,7 @@ Live at **https://accaza-ai.web.app**.
 - `functions/lib/memory.js`: settings, memories, extraction, sensitive-data filter.
 - `functions/lib/skills.js` and `functions/lib/tools.js`: skill storage, ingestion, retrieval tools, and the tool combiner.
 - `functions/lib/websearch.js` and `functions/lib/netguard.js`: web tools and the safe fetch.
+- `functions/lib/google.js`, `functions/lib/mcp.js` and `functions/lib/crypto.js`: connectors and token encryption.
 - `functions/lib/chats.js`: saved chats (create, regenerate, edit, list, rename, delete).
 - `firestore.rules`: browsers get no direct database access. Everything goes through the functions.
 - `tests/server.test.js`: unit tests.
@@ -70,6 +80,7 @@ Live at **https://accaza-ai.web.app**.
 - `skills/{id}` and `skills/{id}/chunks/{id}` (vector index on `embedding`, defined in `firestore.indexes.json`): skills.
 - `uploads/{id}` (TTL `expireAt`) and `uploadUsage/{day}`: attachments and the daily upload cap.
 - `searchUsage/{day}`: web search caps.
+- `users/{uid}/connectors/{google|mcp_*}` and `oauthStates/{state}`: connectors (tokens encrypted) and one-time OAuth states.
 - `usage/{day}`: per-person and total message counts for members and guests (Manila day).
 - `chatLog/{id}`: analytics (who asked, which AI answered, and a SHA-256 hash of the question). The question text is not stored here.
 - `providerHealth/{day}`: backup answers and provider failures.
@@ -77,7 +88,7 @@ Live at **https://accaza-ai.web.app**.
 
 ## AI keys
 
-The keys are stored as Secret Manager secrets in `accaza-ai`: GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY, WEB_SEARCH_KEY. They never go in this repository. To change one:
+The keys are stored as Secret Manager secrets in `accaza-ai`: GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY, WEB_SEARCH_KEY, CONNECTOR_TOKEN_KEY, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET. They never go in this repository. To change one:
 
 ```powershell
 firebase functions:secrets:set GEMINI_API_KEY --project accaza-ai
@@ -94,3 +105,18 @@ cd functions; npm install; cd ..
 npm test
 firebase deploy --project accaza-ai --account danilomagbual@gmail.com
 ```
+
+## Google connector setup (one time)
+
+1. Google Cloud console → project **accaza-ai** → **Google Auth Platform**.
+   - Set up **Branding**: app name "Accaza AI", with your email as the support email.
+   - Under **Audience**, choose External, and add the Google accounts that may connect as **test users** (up to 100).
+2. **Clients → Create client** → Web application.
+   - Authorised redirect URI: `https://accaza-ai.web.app/oauth/google`
+3. Save the client ID and secret as secrets, then redeploy (Actions → Test and deploy → Run workflow):
+   ```powershell
+   firebase functions:secrets:set GOOGLE_OAUTH_CLIENT_ID --project accaza-ai
+   firebase functions:secrets:set GOOGLE_OAUTH_CLIENT_SECRET --project accaza-ai
+   ```
+
+While the app is in "Testing" mode, Google asks each person to reconnect every 7 days. Publishing the app for Gmail/Drive access requires Google's verification.
