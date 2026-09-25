@@ -511,3 +511,90 @@ test("Anthropic adapter streams text and runs tools", async () => {
   assert.equal(bodies[0].body.messages[0].role, "user");
   assert.deepEqual(bodies[1].body.messages.at(-1).content[0], {type: "tool_result", tool_use_id: "t1", content: JSON.stringify({saw: "x"})});
 });
+
+// ---------- Canvas and sites ----------
+const Canvas = require("../functions/lib/canvas");
+test("slugs are clean, and reserved or odd names are refused", () => {
+  assert.equal(Canvas.slugify("Accaza Coffee — Café Menu!"), "accaza-coffee-cafe-menu");
+  assert.equal(Canvas.validSlug("accaza-coffee"), true);
+  for (const bad of ["a", "admin", "-x", "x-", "UPPER", "has space", "x".repeat(60)]) assert.equal(Canvas.validSlug(bad), false, bad);
+});
+test("targeted edits must match exactly once", () => {
+  const code = "<h1>Hi</h1><p>One</p><p>One</p>";
+  assert.equal(Canvas.applyEdits(code, [{find: "<h1>Hi</h1>", replace: "<h1>Hello</h1>"}]).code, "<h1>Hello</h1><p>One</p><p>One</p>");
+  assert.match(Canvas.applyEdits(code, [{find: "<p>One</p>", replace: "x"}]).error, /more than once/);
+  assert.match(Canvas.applyEdits(code, [{find: "<h2>", replace: "x"}]).error, /not found/);
+  assert.match(Canvas.applyEdits(code, []).error, /No edits/);
+});
+test("React canvases become a runnable page; the preview error hook is injected only on request", () => {
+  const doc = Canvas.buildDocument("react", "import React, { useState } from 'react';\nexport default function App(){ const [n,setN]=useState(0); return <button onClick={()=>setN(n+1)}>{n}</button>; }");
+  assert.match(doc, /react-dom@18/); assert.match(doc, /text\/babel/); assert.match(doc, /window\.__App = App;/);
+  assert.doesNotMatch(doc, /^\s*import /m); assert.doesNotMatch(doc, /canvas-error/);
+  assert.match(Canvas.buildDocument("html", "<html><head><title>x</title></head><body>hi</body></html>", {errorHook: true}), /<head><script>\(function\(\)\{function send/);
+});
+test("canvas mode starts for building requests or when a canvas is open", () => {
+  assert.equal(Canvas.canvasMode("Make me a landing page for my café", null), true);
+  assert.equal(Canvas.canvasMode("Build a React calculator", null), true);
+  assert.equal(Canvas.canvasMode("What is a flat white?", null), false);
+  assert.equal(Canvas.canvasMode("make the header green", {id: "c"}), true);
+});
+function canvasDb() {
+  const store = {};
+  const docRef = path => ({
+    id: path.split("/").pop(), path,
+    get: async () => ({exists: Boolean(store[path]), data: () => store[path], ref: docRef(path)}),
+    set: async (v, o) => { store[path] = o && o.merge ? Object.assign({}, store[path], v) : v; },
+    delete: async () => { delete store[path]; },
+    collection: name => colRef(path + "/" + name),
+  });
+  const colRef = path => ({doc: id => docRef(path + "/" + (id || "c" + Object.keys(store).length + Math.random().toString(36).slice(2, 6)))});
+  const db = {store, collection: name => colRef(name), batch: () => { const ops = []; return {set: (r, v, o) => ops.push(() => r.set(v, o)), delete: r => ops.push(() => r.delete()), commit: async () => { for (const op of ops) await op(); }}; },
+    runTransaction: async fn => fn({get: r => r.get(), set: (r, v) => r.set(v)})};
+  return db;
+}
+test("canvas tools create, edit and rewrite with versions; edits need an open canvas", async () => {
+  const db = canvasDb(), changes = [], state = {canvas: null, chatId: "chat1"};
+  const tools = Canvas.canvasTools(db, "u1", state, 1000, c => changes.push(c.action + ":" + c.version));
+  assert.match((await tools.run("edit_canvas", {edits: [{find: "a", replace: "b"}]})).error, /No canvas is open/);
+  const made = await tools.run("create_canvas", {title: "Menu", kind: "html", code: "<h1>Menu</h1>"});
+  assert.equal(made.version, 1);
+  assert.equal((await tools.run("edit_canvas", {edits: [{find: "Menu</h1>", replace: "Our Menu</h1>"}]})).version, 2);
+  assert.equal((await tools.run("rewrite_canvas", {code: "<h1>New</h1>"})).version, 3);
+  assert.deepEqual(changes, ["created:1", "updated:2", "updated:3"]);
+  const doc = db.store[`users/u1/canvases/${made.canvasId}`];
+  assert.equal(doc.code, "<h1>New</h1>"); assert.equal(doc.chatId, "chat1");
+  assert.equal(db.store[`users/u1/canvases/${made.canvasId}/versions/2`].code, "<h1>Our Menu</h1>");
+});
+test("publishing reserves the address for its owner and serves the page with a strict CSP", async () => {
+  const db = canvasDb();
+  const made = await Canvas.createCanvas(db, "u1", {title: "Accaza Menu", kind: "html", code: "<h1>Menu</h1>"}, 1);
+  const pub = await Canvas.publish(db, "u1", made.id, "", 2);
+  assert.equal(pub.slug, "accaza-menu"); assert.equal(pub.url, "https://accaza-sites.web.app/accaza-menu");
+  const other = await Canvas.createCanvas(db, "u2", {title: "x", kind: "html", code: "<p>x</p>"}, 3);
+  await assert.rejects(Canvas.publish(db, "u2", other.id, "accaza-menu", 4), e => e.code === "already-exists");
+  const page = await Canvas.serveSite(db, "/accaza-menu");
+  assert.equal(page.status, 200); assert.match(page.body, /<h1>Menu<\/h1>/);
+  assert.match(page.csp, /connect-src 'none'/); assert.match(page.csp, /form-action 'none'/);
+  await Canvas.unpublish(db, "u1", made.id);
+  assert.equal((await Canvas.serveSite(db, "/accaza-menu")).status, 404);
+  assert.equal((await Canvas.serveSite(db, "/admin")).status, 404);
+});
+
+test("canvas: the app's preview builder matches the server's (no drift between preview and published page)", () => {
+  const Canvas = require("../functions/lib/canvas");
+  const html = require("fs").readFileSync(require("path").join(__dirname, "../public/index.html"), "utf8");
+  const start = html.indexOf("const CV_LIBS="), end = html.indexOf("let cv=null");
+  assert.ok(start > 0 && end > start, "canvas builder block not found in index.html");
+  const client = new Function(html.slice(start, end) + ";return {cvBuild, slugify, CV_CSP};")();
+  const samples = [
+    ["react", "import React, {useState} from 'react';\nimport x from 'lodash';\nexport default function App(){const [n,s]=useState(0);return <button onClick={()=>s(n+1)}>{n}</button>}"],
+    ["react", "function A(){return <p>hi</p>}\nexport default A;"],
+    ["html", "<!doctype html><html><head><title>x</title></head><body>hi</body></html>"],
+    ["html", "<p>no head</p>"],
+  ];
+  for (const [kind, code] of samples) assert.equal(client.cvBuild(kind, code, false), Canvas.buildDocument(kind, code));
+  for (const t of ["Accaza Café Menu!", "Ñandú Park 2026", "  --  "]) assert.equal(client.slugify(t), Canvas.slugify(t));
+  // Preview CSP = published CSP minus frame-ancestors (not allowed in a <meta> policy).
+  assert.equal(client.CV_CSP, Canvas.SITE_CSP.replace(" frame-ancestors 'none';", ""));
+  assert.match(client.cvBuild("html", "<html><head></head></html>", true), /<head><meta http-equiv="Content-Security-Policy"/);
+});

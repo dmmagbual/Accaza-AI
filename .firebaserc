@@ -1,5 +1,17 @@
 {
   "projects": {
     "default": "accaza-ai"
+  },
+  "targets": {
+    "accaza-ai": {
+      "hosting": {
+        "app": [
+          "accaza-ai"
+        ],
+        "sites": [
+          "accaza-sites"
+        ]
+      }
+    }
   }
 }

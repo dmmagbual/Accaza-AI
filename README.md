@@ -65,6 +65,22 @@ Live at **https://accaza-ai.web.app**.
 
   Members and guests also share a ceiling of 100 messages a day in total.
 
+## Canvas and published sites
+
+- Signed-in users can ask for a web page, website, app, game or dashboard. The AI builds it in a **canvas** beside the chat instead of pasting code.
+  - Two kinds: `html` (one self-contained page) or `react` (one component file, with Tailwind classes).
+  - Tabs: Preview (sandboxed iframe, phone or desktop width) and Code (editable; "Save my edits" makes a new version).
+  - Follow-ups edit the open canvas with exact find/replace edits, so small changes do not rewrite the whole page.
+  - Versions: ◀ ▶ to look back, Restore to continue from an older one. The last 50 versions are kept.
+  - Select code and use "Ask" for a change to just that part. Quick actions: improve design, mobile-friendly, fix bugs, add comments.
+  - Errors in the preview are shown with a "Fix this" button.
+  - The **Canvases** button lists every canvas and its site.
+- **Publish** (owner and approved staff): the page goes live at `https://accaza-sites.web.app/<name>`.
+  - Sites are served from a separate origin with a strict Content-Security-Policy: no requests out (`connect-src 'none'`), no form posts. So sites cannot collect data or payments, and cannot reach the app.
+  - "Add a photo" shrinks the photo (about 1600px JPEG, 900 KB max) and hosts it at `/a/<id>` on the sites origin.
+  - Publishing is a snapshot. After more edits, tap **Update site**. Unpublish takes it offline; deleting a canvas also unpublishes it.
+- Canvas turns get a longer time budget (up to about 5 minutes) and larger outputs.
+
 ## Layout
 
 - `public/`: the web app (`index.html`), manifest, service worker and icons, served by Firebase Hosting.
@@ -77,6 +93,8 @@ Live at **https://accaza-ai.web.app**.
 - `functions/lib/websearch.js` and `functions/lib/netguard.js`: web tools and the safe fetch.
 - `functions/lib/google.js`, `functions/lib/mcp.js` and `functions/lib/crypto.js`: connectors and token encryption.
 - `functions/lib/models.js`: model menu, added models, test-before-save, caps.
+- `functions/lib/canvas.js`: canvas storage, versions, AI canvas tools, page builder, publishing, and the `sites` function that serves published pages.
+- `sites-public/`: static files for the accaza-sites Hosting site (everything else goes to the `sites` function).
 - `functions/lib/chats.js`: saved chats (create, regenerate, edit, list, rename, delete).
 - `firestore.rules`: browsers get no direct database access. Everything goes through the functions.
 - `tests/server.test.js`: unit tests.
@@ -90,6 +108,8 @@ Live at **https://accaza-ai.web.app**.
 - `uploads/{id}` (TTL `expireAt`) and `uploadUsage/{day}`: attachments and the daily upload cap.
 - `searchUsage/{day}`: web search caps.
 - `users/{uid}/connectors/{google|mcp_*}` and `oauthStates/{state}`: connectors (tokens encrypted) and one-time OAuth states.
+- `users/{uid}/canvases/{id}` and `.../versions/{n}`: canvases and their versions.
+- `sites/{slug}` and `siteAssets/{id}`: published pages (built HTML) and site photos.
 - `usage/{day}`: per-person and total message counts for members and guests (Manila day).
 - `chatLog/{id}`: analytics (who asked, which AI answered, and a SHA-256 hash of the question). The question text is not stored here.
 - `providerHealth/{day}`: backup answers and provider failures.

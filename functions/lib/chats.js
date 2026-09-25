@@ -48,7 +48,7 @@ function planTurn(messages, mode, question) {
 async function saveTurn(db, uid, chat, plan, result, now) {
   const batch = db.batch();
   let chatRef = chat && chat.ref, created = false, title = chat && chat.data && chat.data.title;
-  if (!chatRef) { chatRef = chatsRef(db, uid).doc(); created = true; title = titleFrom(plan.question); }
+  if (!chatRef) { chatRef = plan.newChatId ? chatsRef(db, uid).doc(plan.newChatId) : chatsRef(db, uid).doc(); created = true; title = titleFrom(plan.question); }
   plan.remove.forEach(message => batch.delete(message.ref));
   let userMessageId = plan.keepUser ? plan.keepUser.id : null;
   if (!plan.keepUser) {
@@ -60,6 +60,7 @@ async function saveTurn(db, uid, chat, plan, result, now) {
   const modelRef = chatRef.collection("messages").doc();
   const modelDoc = {role: "model", text: result.answer, at: now + 1, provider: result.provider, model: result.model};
   if (Array.isArray(result.sources) && result.sources.length) modelDoc.sources = result.sources.slice(0, 12);
+  if (result.canvas) modelDoc.canvas = result.canvas;
   batch.set(modelRef, modelDoc);
   const count = (chat && Number(chat.data.messageCount || 0) || 0) - plan.remove.length + (plan.keepUser ? 1 : 2);
   batch.set(chatRef, created ? {title, createdAt: now, updatedAt: now, messageCount: count} : {updatedAt: now, messageCount: Math.max(0, count)}, {merge: true});
@@ -74,7 +75,7 @@ async function listChats(db, uid) {
 async function listMessages(db, uid, chatId) {
   const {ref, data} = await requireChat(db, uid, chatId);
   const snap = await ref.collection("messages").orderBy("at", "desc").limit(LIST_MESSAGES).get();
-  return {chat: {id: ref.id, title: data.title || "New chat"}, messages: snap.docs.map(doc => { const m = doc.data(); return {id: doc.id, role: m.role, text: m.text || "", at: m.at || 0, attachments: (m.attachments || []).map(f => ({id: f.id, displayName: f.displayName, mimeType: f.mimeType, expiresAt: f.expiresAt})), sources: m.sources || []}; }).reverse()};
+  return {chat: {id: ref.id, title: data.title || "New chat"}, messages: snap.docs.map(doc => { const m = doc.data(); return {id: doc.id, role: m.role, text: m.text || "", at: m.at || 0, attachments: (m.attachments || []).map(f => ({id: f.id, displayName: f.displayName, mimeType: f.mimeType, expiresAt: f.expiresAt})), sources: m.sources || [], canvas: m.canvas || null}; }).reverse()};
 }
 async function renameChat(db, uid, chatId, title) {
   const {ref} = await requireChat(db, uid, chatId);
@@ -96,4 +97,5 @@ async function deleteAllChats(db, uid) {
   return {deletedAll: true};
 }
 
-module.exports = {CONTEXT_MESSAGES, cleanId, titleFrom, requireChat, recentMessages, planTurn, saveTurn, listChats, listMessages, renameChat, deleteChat, deleteAllChats};
+function newChatId(db, uid) { return chatsRef(db, uid).doc().id; }
+module.exports = {newChatId, CONTEXT_MESSAGES, cleanId, titleFrom, requireChat, recentMessages, planTurn, saveTurn, listChats, listMessages, renameChat, deleteChat, deleteAllChats};

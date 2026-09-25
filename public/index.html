@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'"/>
-<meta name="accaza-ai-build" content="11"/>
+<meta name="accaza-ai-build" content="12"/>
 <meta name="description" content="Accaza AI — a general-chat AI assistant."/>
 <meta name="theme-color" content="#19241b"/>
 <title>Accaza AI</title>
@@ -192,6 +192,41 @@
   .srcs a:hover{border-color:var(--accent);}
   .toolLine{font-size:.74rem;color:var(--muted);margin:.1rem 0 .3rem;}
   .toolLine.live::before{content:'⚙ ';}
+  /* Canvas */
+  #canvasPanel{display:none;flex:0 0 56%;min-width:0;border-left:1px solid var(--line);background:var(--panel);flex-direction:column;min-height:0;}
+  body.canvasOpen #canvasPanel{display:flex;}
+  .cvHead{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;padding:.5rem .6rem;border-bottom:1px solid var(--line);}
+  #cvTitle{flex:1 1 140px;min-width:100px;border:1px solid transparent;background:transparent;color:var(--ink);font:inherit;font-weight:700;font-size:.9rem;padding:.3rem .4rem;border-radius:6px;}
+  #cvTitle:focus{border-color:var(--input-line);background:var(--input);}
+  .cvTabs{display:flex;background:var(--side);border-radius:8px;padding:2px;}
+  .cvTabs button{border:0;background:transparent;color:var(--muted);padding:.3rem .65rem;border-radius:6px;cursor:pointer;font-size:.78rem;font-weight:600;}
+  .cvTabs button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12);}
+  .cvTools{display:flex;flex-wrap:wrap;gap:.25rem;align-items:center;}
+  .cvTools button{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:6px;padding:.28rem .5rem;cursor:pointer;font-size:.74rem;}
+  .cvTools button:hover{background:var(--side-hover);} .cvTools button:disabled{opacity:.4;cursor:default;}
+  .cvTools .primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;}
+  #cvVerLabel{font-size:.72rem;color:var(--muted);padding:0 .2rem;white-space:nowrap;}
+  .cvQuick{display:flex;flex-wrap:wrap;gap:.3rem;padding:.4rem .6rem;border-bottom:1px solid var(--line);}
+  .cvQuick button{border:1px solid var(--line);background:var(--side);color:var(--ink);border-radius:99px;padding:.2rem .6rem;font-size:.72rem;cursor:pointer;}
+  #cvErrors{display:none;padding:.45rem .6rem;background:rgba(163,49,32,.1);color:var(--danger);font-size:.76rem;border-bottom:1px solid var(--line);}
+  #cvErrors button{margin-left:.5rem;border:1px solid var(--danger);background:transparent;color:var(--danger);border-radius:6px;padding:.15rem .5rem;font-size:.72rem;cursor:pointer;}
+  #cvBanner{display:none;padding:.4rem .6rem;background:var(--warn-bg);color:var(--warn-ink);font-size:.76rem;border-bottom:1px solid var(--line);}
+  .cvBody{flex:1;min-height:0;position:relative;}
+  #cvPreviewWrap{position:absolute;inset:0;display:flex;justify-content:center;background:var(--side);overflow:auto;}
+  #cvFrame{width:100%;height:100%;border:0;background:#fff;}
+  #cvPreviewWrap.phone #cvFrame{width:390px;max-width:100%;height:100%;border-left:1px solid var(--line);border-right:1px solid var(--line);}
+  #cvCodeWrap{position:absolute;inset:0;display:none;flex-direction:column;}
+  #cvCode{flex:1;width:100%;border:0;resize:none;outline:0;padding:.7rem;font-family:'JetBrains Mono',Consolas,monospace;font-size:.78rem;line-height:1.5;background:var(--code-block);color:var(--code-ink);tab-size:2;white-space:pre;}
+  .cvCodeBar{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;border-top:1px solid var(--line);font-size:.74rem;color:var(--muted);flex-wrap:wrap;}
+  #cvAsk{display:none;gap:.35rem;flex:1 1 100%;} #cvAsk input{flex:1;border:1px solid var(--input-line);background:var(--input);color:var(--ink);border-radius:6px;padding:.35rem .5rem;font:inherit;font-size:.78rem;}
+  #cvPub{display:none;padding:.6rem;border-top:1px solid var(--line);font-size:.78rem;background:var(--side);}
+  #cvPub .row{display:flex;gap:.35rem;align-items:center;flex-wrap:wrap;margin-top:.35rem;}
+  #cvPub input[type=text]{border:1px solid var(--input-line);background:var(--input);color:var(--ink);border-radius:6px;padding:.35rem .5rem;font:inherit;font-size:.8rem;}
+  #cvPub a{color:var(--accent-ink);word-break:break-all;}
+  .cvCard{display:flex;align-items:center;gap:.6rem;border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:.55rem .7rem;margin:.3rem 0;cursor:pointer;max-width:420px;}
+  .cvCard:hover{border-color:var(--accent);} .cvCard b{font-size:.85rem;display:block;} .cvCard small{color:var(--muted);font-size:.72rem;}
+  .cvCard .ic{font-size:1.2rem;}
+  @media (max-width:820px){#canvasPanel{position:absolute;inset:0;z-index:25;flex-basis:auto;border-left:0;}}
   /* Owner: staff panel */
   #staffWrap{display:none;flex:1;min-height:0;overflow:auto;padding:1rem;}
   #staffInner{max-width:760px;margin:0 auto;}
@@ -235,6 +270,7 @@
     <div id="sideFoot">
       <div class="who" id="whoLine"></div>
       <div class="row">
+        <button id="canvasesBtn" type="button" style="display:none">Canvases</button>
         <button id="skillsBtn" type="button" style="display:none">Skills</button>
         <button id="settingsBtn" type="button" style="display:none">Settings</button>
         <button id="themeBtn" type="button">Theme: auto</button>
@@ -411,6 +447,49 @@
     </div>
   </div>
   <div id="dropHint">Drop photos or PDFs to attach</div>
+  <section id="canvasPanel" aria-label="Canvas">
+    <div class="cvHead">
+      <input id="cvTitle" maxlength="80" aria-label="Canvas title"/>
+      <div class="cvTabs"><button type="button" id="cvTabPreview" class="on">Preview</button><button type="button" id="cvTabCode">Code</button></div>
+      <div class="cvTools">
+        <button type="button" id="cvDevice" title="Phone / desktop width">📱</button>
+        <button type="button" id="cvReload" title="Reload preview">↻</button>
+        <button type="button" id="cvPrev" title="Previous version">◀</button><span id="cvVerLabel">v1</span><button type="button" id="cvNext" title="Next version">▶</button>
+        <button type="button" id="cvRestore" style="display:none">Restore</button>
+        <button type="button" id="cvCopy">Copy</button>
+        <button type="button" id="cvDownload">Download</button>
+        <button type="button" id="cvPublishBtn" class="primary" style="display:none">Publish</button>
+        <button type="button" id="cvClose" title="Close">✕</button>
+      </div>
+    </div>
+    <div id="cvBanner"></div>
+    <div id="cvErrors"></div>
+    <div class="cvQuick">
+      <button type="button" data-prompt="Improve the visual design of the canvas: better spacing, typography, colours and polish. Keep the content.">✨ Improve design</button>
+      <button type="button" data-prompt="Make the canvas fully mobile-friendly and responsive.">📱 Mobile-friendly</button>
+      <button type="button" data-prompt="Review the canvas for bugs and fix any you find.">🐞 Fix bugs</button>
+      <button type="button" data-prompt="Add clear comments to the canvas code.">💬 Add comments</button>
+    </div>
+    <div class="cvBody">
+      <div id="cvPreviewWrap"><iframe id="cvFrame" title="Canvas preview" sandbox="allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox"></iframe></div>
+      <div id="cvCodeWrap">
+        <textarea id="cvCode" spellcheck="false" aria-label="Canvas code"></textarea>
+        <div class="cvCodeBar"><button type="button" class="btn small" id="cvSave" disabled>Save my edits</button><span id="cvDirty"></span>
+          <div id="cvAsk"><input id="cvAskInput" placeholder="Ask about the selected code, e.g. make this bigger"/><button type="button" class="btn small" id="cvAskBtn">Ask</button></div>
+        </div>
+      </div>
+    </div>
+    <div id="cvPub">
+      <b>Publish</b> — anyone with the link can view the page. Pages cannot collect data or payments.
+      <div class="row">accaza-sites.web.app/<input type="text" id="cvSlug" maxlength="50" style="width:14rem"/><button type="button" class="btn small" id="cvPublishGo">Publish</button><button type="button" class="btn ghost small" id="cvUnpublish" style="display:none">Unpublish</button></div>
+      <div class="row" id="cvPubLink"></div>
+      <div class="row"><button type="button" class="btn light small" id="cvAddPhoto">＋ Add a photo for the page</button><input type="file" id="cvPhotoInput" accept="image/png,image/jpeg,image/webp" hidden/><span id="cvPhotoMsg"></span></div>
+      <div class="err" id="cvPubErr"></div>
+    </div>
+  </section>
+  <div id="canvasesWrap" style="display:none;flex:1;min-height:0;overflow:auto;padding:1rem;">
+    <div style="max-width:760px;margin:0 auto"><h2 style="font-family:'Playfair Display',serif;font-size:1.25rem;margin:0 0 .6rem;color:var(--accent-ink)">Canvases &amp; sites</h2><div id="canvasList"></div></div>
+  </div>
   <div id="staffWrap">
     <div id="staffInner">
       <h2>Staff</h2>
@@ -432,7 +511,7 @@ const APP_CHECK_SITE_KEY='6LfQgM4tAAAAAPDk6bKu9PMGEmGDgwUUCfNLo1pN';
 try{initializeAppCheck(app,{provider:new ReCaptchaEnterpriseProvider(APP_CHECK_SITE_KEY),isTokenAutoRefreshEnabled:true});}catch(e){console.warn('App Check init failed',e);}
 const auth=getAuth(app),functions=getFunctions(app,'asia-southeast1');
 const skillsCall=httpsCallable(functions,'skills',{timeout:310000});
-const chatCall=httpsCallable(functions,'chat',{timeout:130000}),accountCall=httpsCallable(functions,'account',{timeout:60000}),uploadCall=httpsCallable(functions,'upload',{timeout:100000});
+const chatCall=httpsCallable(functions,'chat',{timeout:310000}),accountCall=httpsCallable(functions,'account',{timeout:60000}),uploadCall=httpsCallable(functions,'upload',{timeout:100000});
 try{await setPersistence(auth,browserLocalPersistence);}catch(_e){}
 
 const by=id=>document.getElementById(id);
@@ -465,10 +544,11 @@ async function copyText(text,button){
 }
 
 // ---------- Views ----------
-const VIEWS=['loginWrap','registerWrap','resetWrap','verifyWrap','chatWrap','staffWrap','settingsWrap','skillsWrap'];
+const VIEWS=['loginWrap','registerWrap','resetWrap','verifyWrap','chatWrap','staffWrap','settingsWrap','skillsWrap','canvasesWrap'];
 function show(view){
-  VIEWS.forEach(v=>{by(v).style.display=v===view?(v==='staffWrap'||v==='settingsWrap'||v==='skillsWrap'?'block':'flex'):'none';});
-  const inApp=view==='chatWrap'||view==='staffWrap'||view==='settingsWrap'||view==='skillsWrap';
+  VIEWS.forEach(v=>{by(v).style.display=v===view?(v==='staffWrap'||v==='settingsWrap'||v==='skillsWrap'||v==='canvasesWrap'?'block':'flex'):'none';});
+  const inApp=view==='chatWrap'||view==='staffWrap'||view==='settingsWrap'||view==='skillsWrap'||view==='canvasesWrap';
+  if(view!=='chatWrap')document.body.classList.remove('canvasOpen');
   by('topbarActions').style.display=inApp?'flex':'none';by('sidebar').style.display=inApp?'flex':'none';by('menuBtn').style.visibility=inApp?'visible':'hidden';
   closeSide();
 }
@@ -535,6 +615,7 @@ function turnEl(turn){
   if(turn.role==='model'&&turn.tools&&turn.tools.length){const tl=document.createElement('div');tl.className='toolLine';tl.textContent='Used: '+turn.tools.map(t=>t.label).join(' · ');wrap.appendChild(tl);}
   if(turn.role==='user'){bubble.textContent=turn.text;if(!turn.text)bubble.style.display='none';}else if(turn.error){bubble.classList.add('error');bubble.textContent=turn.text;}else paint(bubble,turn.text,false);
   wrap.append(bubble);
+  if(turn.role==='model'&&turn.canvas&&turn.canvas.id){turn.cvEl=cvCard(turn.canvas);wrap.appendChild(turn.cvEl);}
   if(turn.role==='model'&&turn.sources&&turn.sources.length){turn.srcEl=sourcesEl(turn.sources);wrap.appendChild(turn.srcEl);}
   wrap.append(actions);turn.el=wrap;turn.bubble=bubble;turn.actions=actions;return wrap;
 }
@@ -612,6 +693,9 @@ async function send(mode){
   if(pinnedSkill&&saves())payload.skillId=pinnedSkill.id;
   const pickedModel=by('modelSelect').value||'auto';
   if(pickedModel!=='auto')payload.model=pickedModel;
+  // The open canvas travels with the message so the AI edits it (unsaved edits are saved first).
+  if(saves()&&cv&&cvIsOpen()){if(cvDirty){try{await cvSaveEdits();}catch(_e){}}payload.canvasId=cv.id;if(cvSelection)payload.canvasSelection=cvSelection;}
+  cvSelection='';
   let toolLine=null;
   const showTool=t=>{
     if(!toolLine){toolLine=document.createElement('div');toolLine.className='toolLine live';ai.el.insertBefore(toolLine,ai.bubble);}
@@ -622,6 +706,7 @@ async function send(mode){
     const {stream,data}=await chatCall.stream(payload,{signal:controller.signal});
     for await(const chunk of stream){
       if(chunk&&chunk.tool){showTool(chunk.tool);continue;}
+      if(chunk&&chunk.canvas){setTurnCanvas(ai,chunk.canvas);openCanvas(chunk.canvas.id);continue;}
       if(chunk&&chunk.sources){ai.sources=chunk.sources;const el=sourcesEl(chunk.sources);if(ai.srcEl)ai.srcEl.replaceWith(el);else ai.el.insertBefore(el,ai.actions);ai.srcEl=el;continue;}
       if(chunk&&chunk.reset){text='';shown=0;}else if(chunk&&chunk.delta)text+=chunk.delta;
       if(!frame)frame=setTimeout(draw,16);
@@ -634,6 +719,7 @@ async function send(mode){
     if(toolLine){toolLine.remove();toolLine=null;}
     if(result.sources&&result.sources.length){ai.sources=result.sources;const el=sourcesEl(result.sources);if(ai.srcEl)ai.srcEl.replaceWith(el);else ai.el.insertBefore(el,ai.actions);ai.srcEl=el;}
     if(result.tools&&result.tools.length){ai.tools=result.tools;const tl=document.createElement('div');tl.className='toolLine';tl.textContent='Used: '+result.tools.map(t=>t.label).join(' · ');ai.el.insertBefore(tl,ai.bubble);}
+    if(result.canvas&&result.canvas.id){setTurnCanvas(ai,result.canvas);openCanvas(result.canvas.id);}
     if(result.chatId)rememberModel(result.chatId,pickedModel);
     const note=result.modelNote||(pickedModel!=='auto'&&result.answeredBy?'Answered by '+result.answeredBy:'');
     if(note){ai.modelNote=note;const nl=document.createElement('div');nl.className='toolLine';nl.textContent=note;ai.el.insertBefore(nl,ai.bubble);}
@@ -660,15 +746,16 @@ async function send(mode){
 }
 
 function newChat(){
-  if(busy)return;current=null;turns=[];cancelEdit();pinnedSkill=null;clearChips();applyModelFor(null);try{sessionStorage.removeItem(LAST_CHAT);sessionStorage.removeItem(GUEST_TURNS);}catch(e){}
+  if(busy)return;current=null;turns=[];cv=null;closeCanvas();cancelEdit();pinnedSkill=null;clearChips();applyModelFor(null);try{sessionStorage.removeItem(LAST_CHAT);sessionStorage.removeItem(GUEST_TURNS);}catch(e){}
   renderTurns();renderChatList();show('chatWrap');q.focus();
 }
 by('newChatBtn').addEventListener('click',newChat);
 async function openChat(id,quiet){
   if(busy)return;
+  if(cv&&cv.chatId!==id){cv=null;closeCanvas();}
   try{
     const data=(await accountCall({action:'messages',chatId:id})).data||{};
-    current={id:data.chat.id,title:data.chat.title};turns=(data.messages||[]).map(m=>({role:m.role,text:m.text,id:m.id,attachments:m.attachments||[],sources:m.sources||[]}));
+    current={id:data.chat.id,title:data.chat.title};turns=(data.messages||[]).map(m=>({role:m.role,text:m.text,id:m.id,attachments:m.attachments||[],sources:m.sources||[],canvas:m.canvas||null}));
     cancelEdit();renderTurns();renderChatList();show('chatWrap');applyModelFor(id);try{sessionStorage.setItem(LAST_CHAT,id);}catch(e){}
   }catch(e){if(!quiet){chats=chats.filter(c=>c.id!==id);renderChatList();}newChat();}
 }
@@ -1117,6 +1204,229 @@ async function loadStaff(){
 }
 by('staffBtn').addEventListener('click',()=>{if(by('staffWrap').style.display==='block'){show('chatWrap');by('staffBtn').textContent='Staff';}else{show('staffWrap');by('staffBtn').textContent='Back to chat';loadStaff();}});
 
+// ---------- Canvas (pages, apps and long code beside the chat) ----------
+// The preview runs in a sandboxed iframe (no same-origin access to this app) with the same
+// Content-Security-Policy as published sites, so what works here works when published.
+const CV_LIBS={react:'https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js',reactDom:'https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js',babel:'https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js',tailwind:'https://cdn.tailwindcss.com/3.4.16'};
+const CV_CSP="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdn.tailwindcss.com; style-src 'unsafe-inline' https:; img-src https: data: blob:; font-src https: data:; media-src https:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src https://www.google.com https://www.youtube.com https://www.youtube-nocookie.com https://maps.google.com";
+const CV_HOOK='<script>(function(){function send(m){try{parent.postMessage({type:"canvas-error",message:String(m).slice(0,500)},"*")}catch(e){}}window.addEventListener("error",function(e){send(e.message+(e.lineno?" (line "+e.lineno+")":""))});window.addEventListener("unhandledrejection",function(e){send(e.reason&&e.reason.message||e.reason)});var ce=console.error;console.error=function(){send([].slice.call(arguments).join(" "));ce.apply(console,arguments)}})();<\/script>';
+function slugify(v){return String(v||'').normalize('NFKD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,50);}
+// Same output as the server's buildDocument; `preview` adds the site CSP and the error reporter.
+function cvBuild(kind,code,preview){
+  const head=preview?'<meta http-equiv="Content-Security-Policy" content="'+CV_CSP+'">'+CV_HOOK:'';
+  if(kind==='react'){
+    const src=String(code||'');
+    const body=src.replace(/^\s*import\s+React[^;\n]*;?\s*$/gm,'')
+      .replace(/^\s*import\s+\{([^}]*)\}\s+from\s+['"]react['"];?\s*$/gm,(m,names)=>'const {'+names+'} = React;')
+      .replace(/^\s*import\s+[^;\n]*from\s+['"][^'"]+['"];?\s*$/gm,'')
+      .replace(/export\s+default\s+function\s+([A-Za-z0-9_]+)/,'function $1')
+      .replace(/export\s+default\s+([A-Za-z0-9_]+)\s*;?/,'window.__App = $1;');
+    const name=(src.match(/export\s+default\s+function\s+([A-Za-z0-9_]+)/)||[])[1];
+    return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'+head+'<script src="'+CV_LIBS.tailwind+'"><\/script><script src="'+CV_LIBS.react+'"><\/script><script src="'+CV_LIBS.reactDom+'"><\/script><script src="'+CV_LIBS.babel+'"><\/script></head><body><div id="root"></div><script type="text/babel" data-presets="react">const {useState,useEffect,useMemo,useRef,useCallback,useReducer,Fragment} = React;\n'+body+'\n'+(name?'window.__App = '+name+';':'')+'\nReactDOM.createRoot(document.getElementById("root")).render(React.createElement(window.__App || (() => React.createElement("p", null, "No component exported."))));<\/script></body></html>';
+  }
+  const html=String(code||'');
+  if(!head)return html;
+  return /<head[^>]*>/i.test(html)?html.replace(/<head[^>]*>/i,m=>m+head):head+html;
+}
+let cv=null,cvDirty=false,cvErrs=[],cvSeq=0,cvSelection='',cvTimer=0;
+const cvIsOpen=()=>document.body.classList.contains('canvasOpen');
+function cvNotice(text,label,action){
+  const b=by('cvBanner');b.replaceChildren();if(!text){b.style.display='none';return;}
+  b.append(text);if(label){const x=document.createElement('button');x.type='button';x.className='btn ghost small';x.style.marginLeft='.5rem';x.textContent=label;x.addEventListener('click',action);b.append(x);}
+  b.style.display='block';
+}
+function cvSetDirty(on){cvDirty=on;by('cvSave').disabled=!on;by('cvDirty').textContent=on?'Unsaved edits (the preview shows them).':'';}
+function cvShowErrors(){
+  const box=by('cvErrors');box.replaceChildren();
+  if(!cvErrs.length){box.style.display='none';return;}
+  box.append('⚠ The page reported '+(cvErrs.length===1?'an error':cvErrs.length+' errors')+': '+cvErrs[0]);
+  const b=document.createElement('button');b.type='button';b.textContent='Fix this';
+  b.addEventListener('click',()=>askCanvas('The canvas preview reports these errors. Find the cause and fix them:\n'+cvErrs.join('\n')));
+  box.append(b);box.style.display='block';
+}
+function cvPreview(code){cvErrs=[];cvShowErrors();if(cv)by('cvFrame').srcdoc=cvBuild(cv.kind,code,true);}
+window.addEventListener('message',e=>{
+  if(e.source!==by('cvFrame').contentWindow)return;
+  const d=e.data;if(!d||d.type!=='canvas-error')return;
+  const m=String(d.message||'').slice(0,300);if(!m||cvErrs.includes(m)||cvErrs.length>=5)return;
+  cvErrs.push(m);cvShowErrors();
+});
+function cvTab(code){by('cvTabPreview').classList.toggle('on',!code);by('cvTabCode').classList.toggle('on',code);by('cvPreviewWrap').style.display=code?'none':'flex';by('cvCodeWrap').style.display=code?'flex':'none';}
+function renderPub(){
+  if(!cv)return;const p=cv.published;
+  by('cvSlug').value=p?p.slug:slugify(cv.title);
+  by('cvUnpublish').style.display=p?'inline-block':'none';by('cvPublishGo').textContent=p?'Update site':'Publish';
+  by('cvPublishBtn').textContent=p?'Published ✓':'Publish';
+  const link=by('cvPubLink');link.replaceChildren();
+  if(p){
+    const a=document.createElement('a'),c=document.createElement('button');a.href=p.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=p.url;
+    c.type='button';c.className='btn ghost small';c.textContent='Copy link';c.addEventListener('click',e=>copyText(p.url,e.currentTarget));
+    link.append('Live at ',a,c);
+    if(p.version&&p.version<cv.latest){const s=document.createElement('small');s.textContent='The site shows version '+p.version+'. Tap Update site to publish version '+cv.latest+'.';s.style.flexBasis='100%';link.append(s);}
+  }
+  showMsg('cvPubErr','');
+}
+function renderCanvas(){
+  if(!cv)return;
+  const old=cv.viewing<cv.latest;
+  by('cvTitle').value=cv.title||'';
+  by('cvVerLabel').textContent='v'+cv.viewing+(old?' of '+cv.latest:'');
+  by('cvPrev').disabled=cv.viewing<=1;by('cvNext').disabled=cv.viewing>=cv.latest;
+  by('cvRestore').style.display=old?'inline-block':'none';
+  const code=by('cvCode');code.value=cv.code||'';code.readOnly=old;by('cvAsk').style.display='none';
+  cvSetDirty(false);
+  by('cvPublishBtn').style.display=cv.canPublish?'inline-block':'none';
+  if(!cv.canPublish)by('cvPub').style.display='none';
+  cvNotice(old?'You are looking at version '+cv.viewing+'. Restore it to continue from it, or go forward with ▶.':'');
+  renderPub();cvPreview(cv.code);
+}
+async function openCanvas(id,version){
+  if(!saves()||!id)return;
+  const seq=++cvSeq;
+  if(by('chatWrap').style.display!=='flex')show('chatWrap');
+  document.body.classList.add('canvasOpen');closeSide();
+  try{
+    const d=(await accountCall(Object.assign({action:'canvasGet',canvasId:id},version?{version}:{}))).data;
+    if(seq!==cvSeq)return;
+    cv=d;renderCanvas();
+  }catch(e){
+    if(seq!==cvSeq)return;
+    cv=null;by('cvFrame').srcdoc='';by('cvCode').value='';by('cvTitle').value='';cvNotice(cleanErr(e,'Could not open the canvas.'),'Close',closeCanvas);
+  }
+}
+function closeCanvas(){document.body.classList.remove('canvasOpen');by('cvPub').style.display='none';}
+async function cvSaveEdits(){
+  if(!cv||!cvDirty)return;
+  const code=by('cvCode').value;
+  const r=(await accountCall({action:'canvasSave',canvasId:cv.id,code})).data;
+  cv.code=code;cv.latest=cv.viewing=r.version;renderCanvas();
+}
+function askCanvas(text,selection){
+  if(busy){cvNotice('Wait for the current answer to finish, then try again.');return;}
+  if(editing)cancelEdit();
+  cvSelection=selection||'';q.value=text;autosize();by('askForm').requestSubmit();
+}
+// Adds the canvas card to an AI turn (and keeps the turn's canvas for later).
+function cvCard(info){
+  const c=document.createElement('div'),ic=document.createElement('span'),t=document.createElement('div'),b=document.createElement('b'),s=document.createElement('small');
+  c.className='cvCard';c.setAttribute('role','button');c.tabIndex=0;ic.className='ic';ic.textContent=info.kind==='react'?'⚛':'🌐';
+  b.textContent=info.title||'Canvas';s.textContent='Canvas · version '+(info.version||1)+' · tap to open';t.append(b,s);c.append(ic,t);
+  const go=()=>openCanvas(info.id);
+  c.addEventListener('click',go);c.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go();}});
+  return c;
+}
+function setTurnCanvas(turn,info){
+  if(!info||!info.id||!turn.el)return;turn.canvas=info;
+  const el=cvCard(info);if(turn.cvEl)turn.cvEl.replaceWith(el);else turn.el.insertBefore(el,turn.srcEl||turn.actions);turn.cvEl=el;
+}
+async function sitePhoto(file){
+  const bmp=await createImageBitmap(file);let max=1600,quality=0.85,blob=null;
+  try{
+    for(let i=0;i<7;i++){
+      const s=Math.min(1,max/Math.max(bmp.width,bmp.height)),c=document.createElement('canvas');c.width=Math.round(bmp.width*s);c.height=Math.round(bmp.height*s);
+      const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(bmp,0,0,c.width,c.height);
+      blob=await new Promise(r=>c.toBlob(r,'image/jpeg',quality));
+      if(blob&&blob.size<=900*1024)return blob;
+      max=Math.round(max*0.8);quality=Math.max(0.6,quality-0.07);
+    }
+  }finally{bmp.close&&bmp.close();}
+  throw new Error('That photo is too large for a site.');
+}
+by('cvTabPreview').addEventListener('click',()=>cvTab(false));
+by('cvTabCode').addEventListener('click',()=>cvTab(true));
+by('cvDevice').addEventListener('click',()=>by('cvPreviewWrap').classList.toggle('phone'));
+by('cvReload').addEventListener('click',()=>cvPreview(by('cvCode').value));
+by('cvClose').addEventListener('click',closeCanvas);
+function cvGo(version){
+  if(!cv)return;
+  if(cvDirty){cvNotice('You have unsaved edits.','Discard them',()=>{cvSetDirty(false);openCanvas(cv.id,version);});return;}
+  openCanvas(cv.id,version);
+}
+by('cvPrev').addEventListener('click',()=>{if(cv&&cv.viewing>1)cvGo(cv.viewing-1);});
+by('cvNext').addEventListener('click',()=>{if(cv&&cv.viewing<cv.latest)cvGo(cv.viewing+1);});
+by('cvRestore').addEventListener('click',async()=>{
+  if(!cv)return;const b=by('cvRestore');b.disabled=true;
+  try{await accountCall({action:'canvasRestore',canvasId:cv.id,version:cv.viewing});await openCanvas(cv.id);}catch(e){cvNotice(cleanErr(e,'Could not restore.'));}
+  b.disabled=false;
+});
+by('cvCopy').addEventListener('click',e=>copyText(by('cvCode').value,e.currentTarget));
+by('cvDownload').addEventListener('click',()=>{
+  if(!cv)return;
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([cvBuild(cv.kind,by('cvCode').value,false)],{type:'text/html'}));
+  a.download=(slugify(cv.title)||'canvas')+'.html';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500);
+});
+by('cvCode').addEventListener('input',()=>{cvSetDirty(true);clearTimeout(cvTimer);cvTimer=setTimeout(()=>cvPreview(by('cvCode').value),800);});
+by('cvCode').addEventListener('keydown',e=>{if(e.key==='Tab'&&!e.shiftKey&&!by('cvCode').readOnly){e.preventDefault();const t=e.currentTarget,s=t.selectionStart;t.setRangeText('  ',s,t.selectionEnd,'end');t.dispatchEvent(new Event('input'));}});
+by('cvSave').addEventListener('click',async()=>{const b=by('cvSave');b.disabled=true;try{await cvSaveEdits();}catch(e){cvNotice(cleanErr(e,'Could not save your edits.'));b.disabled=false;}});
+function cvSelected(){const t=by('cvCode'),s=t.value.slice(t.selectionStart,t.selectionEnd);by('cvAsk').style.display=s.trim()&&!t.readOnly?'flex':'none';return s;}
+['select','mouseup','keyup'].forEach(ev=>by('cvCode').addEventListener(ev,cvSelected));
+by('cvAskBtn').addEventListener('click',()=>{const s=cvSelected(),text=by('cvAskInput').value.trim();if(!s.trim()||!text)return;by('cvAskInput').value='';askCanvas(text,s);});
+by('cvAskInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();by('cvAskBtn').click();}});
+document.querySelectorAll('.cvQuick button').forEach(b=>b.addEventListener('click',()=>askCanvas(b.dataset.prompt)));
+async function cvRename(){
+  if(!cv)return;const t=by('cvTitle').value.replace(/\s+/g,' ').trim();
+  if(!t||t===cv.title){by('cvTitle').value=cv.title||'';return;}
+  try{cv.title=((await accountCall({action:'canvasRename',canvasId:cv.id,title:t})).data||{}).title||t;renderPub();}
+  catch(e){by('cvTitle').value=cv.title||'';cvNotice(cleanErr(e,'Could not rename.'));}
+}
+by('cvTitle').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();e.currentTarget.blur();}});
+by('cvTitle').addEventListener('blur',cvRename);
+by('cvPublishBtn').addEventListener('click',()=>{const p=by('cvPub');p.style.display=p.style.display==='block'?'none':'block';if(p.style.display==='block')renderPub();});
+by('cvPublishGo').addEventListener('click',async()=>{
+  if(!cv)return;const b=by('cvPublishGo');b.disabled=true;showMsg('cvPubErr','');
+  try{
+    if(cvDirty)await cvSaveEdits();
+    const r=(await accountCall({action:'sitePublish',canvasId:cv.id,slug:by('cvSlug').value.trim()})).data;
+    cv.published={slug:r.slug,url:r.url,version:cv.latest};renderPub();
+  }catch(e){showMsg('cvPubErr',cleanErr(e,'Could not publish.'));}
+  b.disabled=false;
+});
+let armedUnpub=0;
+by('cvUnpublish').addEventListener('click',async()=>{
+  const b=by('cvUnpublish');if(!cv)return;
+  if(!armedUnpub){armedUnpub=setTimeout(()=>{armedUnpub=0;b.textContent='Unpublish';},3000);b.textContent='Tap again to take it offline';return;}
+  clearTimeout(armedUnpub);armedUnpub=0;b.disabled=true;
+  try{await accountCall({action:'siteUnpublish',canvasId:cv.id});cv.published=null;renderPub();}catch(e){showMsg('cvPubErr',cleanErr(e,'Could not unpublish.'));}
+  b.disabled=false;b.textContent='Unpublish';
+});
+by('cvAddPhoto').addEventListener('click',()=>by('cvPhotoInput').click());
+by('cvPhotoInput').addEventListener('change',async e=>{
+  const f=e.target.files&&e.target.files[0];e.target.value='';if(!f)return;
+  const msg=by('cvPhotoMsg');msg.textContent='Uploading…';showMsg('cvPubErr','');
+  try{
+    const blob=await sitePhoto(f);
+    const r=(await accountCall({action:'siteImage',name:(f.name||'photo').replace(/\.[^.]+$/,'')+'.jpg',mimeType:'image/jpeg',base64:await toBase64(blob)})).data;
+    msg.textContent='Added ✓ Tell the AI where to put it, then press Ask.';
+    q.value='Use this photo in the page: '+r.url+' — put it ';autosize();q.focus();
+  }catch(err){msg.textContent='';showMsg('cvPubErr',cleanErr(err,'Could not add the photo.'));}
+});
+// Canvases & sites list
+async function openCanvases(){
+  show('canvasesWrap');const box=by('canvasList');box.textContent='Loading…';
+  try{
+    const list=((await accountCall({action:'canvasList'})).data||{}).canvases||[];box.replaceChildren();
+    if(!list.length){const n=document.createElement('p');n.style.color='var(--muted)';n.textContent='No canvases yet. Ask for a page or app in the chat, for example: "Build a landing page for Accaza Coffee with our menu and opening hours".';box.appendChild(n);return;}
+    list.forEach(c=>{
+      const row=document.createElement('div'),name=document.createElement('span'),meta=document.createElement('small'),open=document.createElement('button'),del=document.createElement('button');
+      row.className='fileRow';name.textContent=(c.kind==='react'?'⚛ ':'🌐 ')+c.title;
+      meta.textContent='v'+c.version+(c.updatedAt?' · '+new Date(c.updatedAt).toLocaleDateString():'');
+      name.appendChild(document.createElement('br'));name.appendChild(meta);
+      if(c.published){const a=document.createElement('a');a.href=c.published.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=' · '+c.published.url.replace(/^https:\/\//,'');a.style.fontSize='.72rem';name.appendChild(a);}
+      open.type='button';open.className='btn small';open.textContent='Open';
+      open.addEventListener('click',async()=>{if(c.chatId&&(!current||current.id!==c.chatId))await openChat(c.chatId,true);else show('chatWrap');openCanvas(c.id);});
+      del.type='button';del.textContent='🗑';del.title=c.published?'Delete (also takes the site offline)':'Delete';
+      let armed=0;
+      del.addEventListener('click',async()=>{
+        if(!armed){armed=setTimeout(()=>{armed=0;del.textContent='🗑';},3000);del.textContent=c.published?'Delete + unpublish?':'Delete?';return;}
+        clearTimeout(armed);del.disabled=true;
+        try{await accountCall({action:'canvasDelete',canvasId:c.id});row.remove();if(cv&&cv.id===c.id){cv=null;closeCanvas();}}catch(e){del.disabled=false;del.textContent='🗑';}
+      });
+      row.append(name,open,del);box.appendChild(row);
+    });
+  }catch(e){box.textContent=cleanErr(e,'Could not load your canvases.');}
+}
+by('canvasesBtn').addEventListener('click',()=>{if(by('canvasesWrap').style.display==='block')show('chatWrap');else openCanvases();});
+
 // Return from Google sign-in: remember the result and tidy the address bar.
 let connectorReturn=null;
 try{const u=new URL(location.href);if(u.searchParams.get('connector')==='google'){connectorReturn=u.searchParams.get('status')||'error';history.replaceState(null,'','/');}}catch(e){}
@@ -1135,10 +1445,10 @@ async function render(user){
   }
   const changed=user.uid!==lastUid;lastUid=user.uid;
   by('signOutBtn').textContent=user.isAnonymous?'Exit guest':'Sign out';
-  by('staffBtn').style.display='none';by('staffBtn').textContent='Staff';by('settingsBtn').style.display='none';by('skillsBtn').style.display='none';
+  by('staffBtn').style.display='none';by('staffBtn').textContent='Staff';by('settingsBtn').style.display='none';by('skillsBtn').style.display='none';by('canvasesBtn').style.display='none';
   ME={tier:user.isAnonymous?'guest':'member'};setAllowance(null);
   by('whoLine').textContent=user.isAnonymous?'Guest':(user.displayName||user.email||'');
-  if(changed){current=null;chats=[];turns=user.isAnonymous?loadGuestTurns():[];}
+  if(changed){current=null;chats=[];cv=null;closeCanvas();turns=user.isAnonymous?loadGuestTurns():[];}
   renderTurns();renderChatList();show('chatWrap');
   try{
     const me=(await accountCall({action:'me'})).data||{};if(seq!==renderSeq)return;
@@ -1147,7 +1457,7 @@ async function render(user){
     if(me.tier==='owner')by('staffBtn').style.display='inline-block';
     by('settingsBtn').style.display=saves()?'inline-block':'none';by('tabConnectors').style.display=(me.tier==='owner'||me.tier==='staff')?'inline-block':'none';by('tabModels').style.display=me.tier==='owner'?'inline-block':'none';
     loadModelMenu();
-    if(connectorReturn&&saves()){const st=connectorReturn;connectorReturn=null;openSettings('connectors');const msg={connected:'Google connected.','no-access':'Google connected, but no access was granted. Try again and tick the boxes.',cancelled:'Google sign-in was cancelled.',expired:'That sign-in link expired. Please try again.',error:'Google sign-in failed. Please try again.'}[st]||'';setTimeout(()=>{showMsg(st==='connected'?'connInfo':'connErr',msg);},400);}by('skillsBtn').style.display=saves()?'inline-block':'none';mySkills=[];
+    if(connectorReturn&&saves()){const st=connectorReturn;connectorReturn=null;openSettings('connectors');const msg={connected:'Google connected.','no-access':'Google connected, but no access was granted. Try again and tick the boxes.',cancelled:'Google sign-in was cancelled.',expired:'That sign-in link expired. Please try again.',error:'Google sign-in failed. Please try again.'}[st]||'';setTimeout(()=>{showMsg(st==='connected'?'connInfo':'connErr',msg);},400);}by('skillsBtn').style.display=saves()?'inline-block':'none';by('canvasesBtn').style.display=saves()?'inline-block':'none';mySkills=[];
     by('whoLine').textContent=user.isAnonymous?'Guest':((me.name||user.email||'')+' · '+me.tier);
     if(saves()&&changed)await loadChats();else renderChatList();
   }catch(e){console.warn('account check failed',e);}
