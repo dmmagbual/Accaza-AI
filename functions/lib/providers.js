@@ -16,13 +16,17 @@ const FIRST_TEXT_MS = 25000;
 const OLLAMA_FIRST_TEXT_MS = 70000;
 const ASHNA_TIMEOUT_MS = 20000;
 const MIN_ATTEMPT_MS = 8000;
+// Canvas mode (building pages/apps): long outputs, and a function call with a whole page as its
+// argument only arrives when it is finished, so the first-output wait and total budget are longer.
+const BIG_BUDGET_MS = 280000;
+const BIG_FIRST_MS = 180000;
 const HISTORY_ENTRIES = 12;
 const HISTORY_CHARS = 1500;
 const MAX_ANSWER_CHARS = 40000;
 // qwen3:8b runs CPU-only at roughly 5-6 tokens/s, so its reply length is sized to the time it has.
 const OLLAMA_MAX_TOKENS = 350;
 // Groq's free tier allows 8,000 tokens per minute (prompt + max_tokens), so its cap stays modest.
-const GROQ = {label: "Groq", url: "https://api.groq.com/openai/v1/chat/completions", model: "openai/gpt-oss-120b", maxTokens: 1500, extra: {reasoning_effort: "low"}};
+const GROQ = {label: "Groq", url: "https://api.groq.com/openai/v1/chat/completions", model: "openai/gpt-oss-120b", maxTokens: 1500, bigTokens: 1500, extra: {reasoning_effort: "low"}};
 const CEREBRAS = {label: "Cerebras", url: "https://api.cerebras.ai/v1/chat/completions", model: "gpt-oss-120b", maxTokens: 3000, extra: {reasoning_effort: "low"}};
 const DEEPSEEK = {label: "DeepSeek", url: "https://api.deepseek.com/chat/completions", model: "deepseek-flash", maxTokens: 2000, extra: {}};
 const ASHNA = {label: "Ashna", url: "https://api.ashna.ai/v1/api/chat/completions", model: "glm-5.3-flash", maxTokens: 1500, extra: {}};
@@ -179,7 +183,7 @@ function parseArgs(raw) {
 async function askGemini(key, config, req, limits, ctx) {
   const started = Date.now(), total = limits.totalMs;
   const contents = [...chatHistory(req.history).map(row => ({role: row.role, parts: geminiParts(row.text, row.files, row.fileNames)})), {role: "user", parts: geminiParts(req.question, req.files || [])}];
-  const generationConfig = {temperature: 0.4, maxOutputTokens: config.maxOutputTokens};
+  const generationConfig = {temperature: 0.4, maxOutputTokens: req.big ? Math.max(config.maxOutputTokens, 32768) : config.maxOutputTokens};
   if (config.thinkingLevel) generationConfig.thinkingConfig = {thinkingLevel: config.thinkingLevel};
   const tools = req.tools && req.tools.declarations.length ? [{functionDeclarations: req.tools.declarations}] : null;
   let text = "";
@@ -189,7 +193,7 @@ async function askGemini(key, config, req, limits, ctx) {
     if (tools && !final) body.tools = tools;
     if (tools && final) body.toolConfig = {functionCallingConfig: {mode: "NONE"}};
     if (tools && final) body.tools = tools;
-    const lim = round === 0 ? limits : roundLimits(started, total, FIRST_TEXT_MS);
+    const lim = round === 0 ? limits : roundLimits(started, total, req.big ? BIG_FIRST_MS : FIRST_TEXT_MS);
     await streamLines("Gemini", `${ENDPOINTS.gemini}/v1beta/models/${config.model}:streamGenerateContent?alt=sse`, {method: "POST", headers: {"content-type": "application/json", "x-goog-api-key": key}, body: JSON.stringify(body)}, lim,
       async (line, json, markText) => {
         const data = json || sseData(line);
@@ -218,9 +222,9 @@ async function askOpenAiCompatible(provider, key, req, limits, ctx) {
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
     const final = round === MAX_TOOL_ROUNDS || !tools, calls = [];
     let roundText = "";
-    const body = Object.assign({model: provider.model, messages, temperature: 0.4, max_tokens: provider.maxTokens, stream: true}, provider.extra);
+    const body = Object.assign({model: provider.model, messages, temperature: 0.4, max_tokens: req.big ? Math.max(provider.maxTokens, provider.bigTokens || 8000) : provider.maxTokens, stream: true}, provider.extra);
     if (tools) { body.tools = tools; body.tool_choice = final ? "none" : "auto"; }
-    const lim = round === 0 ? limits : roundLimits(started, total, FIRST_TEXT_MS);
+    const lim = round === 0 ? limits : roundLimits(started, total, req.big ? BIG_FIRST_MS : FIRST_TEXT_MS);
     await streamLines(provider.label, provider.url, {method: "POST", headers: {"content-type": "application/json", authorization: `Bearer ${key}`}, body: JSON.stringify(body)}, lim,
       async (line, json, markText) => {
         const data = json || sseData(line);
@@ -266,9 +270,9 @@ async function askAnthropic(provider, key, req, limits, ctx) {
   let text = "";
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
     const final = round === MAX_TOOL_ROUNDS || !tools, blocks = [];
-    const body = {model: provider.model, max_tokens: provider.maxTokens || 4000, system: systemText(req.system), messages, stream: true, temperature: 0.4};
+    const body = {model: provider.model, max_tokens: req.big ? 16000 : provider.maxTokens || 4000, system: systemText(req.system), messages, stream: true, temperature: 0.4};
     if (tools) { body.tools = tools; body.tool_choice = final ? {type: "none"} : {type: "auto"}; }
-    const lim = round === 0 ? limits : roundLimits(started, total, FIRST_TEXT_MS);
+    const lim = round === 0 ? limits : roundLimits(started, total, req.big ? BIG_FIRST_MS : FIRST_TEXT_MS);
     await streamLines(provider.label, provider.url, {method: "POST", headers: {"content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"}, body: JSON.stringify(body)}, lim,
       async (line, json, markText) => {
         const data = json || sseData(line);
@@ -344,7 +348,9 @@ function generalChatProviders(req) {
     ...(strong || files.length ? [builtinProvider("gemini-lite", req)] : []),
     ...["groq", "cerebras", "deepseek", "ollama", "ashna"].map(id => builtinProvider(id, req)),
   ];
+  if (req.big) auto.forEach(p => { if (p.name !== "ollama" && p.name !== "ashna") p.firstMs = BIG_FIRST_MS; });
   const chosen = req.chosen;
+  if (chosen && req.big) chosen.firstMs = BIG_FIRST_MS;
   if (chosen && (chosen.files || !files.length)) {
     const same = p => p.name === chosen.name || (BUILTIN_IDS.includes(chosen.name) && p.model === chosen.model);
     return [chosen, ...auto.filter(p => !same(p))];
@@ -354,14 +360,14 @@ function generalChatProviders(req) {
 
 // hooks: {onDelta(text), onReset(), onEvent(event), onUnusual(answeredBy|null, failures)}.
 async function withFallback(providers, hooks = {}) {
-  const started = Date.now(), failures = [];
+  const started = Date.now(), failures = [], budget = hooks.budgetMs || REQUEST_BUDGET_MS;
   let configured = 0;
   for (let index = 0; index < providers.length; index += 1) {
     const provider = providers[index];
     if (!provider.enabled()) continue;
     configured += 1;
     const reserve = providers.slice(index + 1).reduce((total, next) => total + (next.reserveMs && next.enabled() ? next.reserveMs : 0), 0);
-    const remaining = REQUEST_BUDGET_MS - (Date.now() - started) - reserve;
+    const remaining = budget - (Date.now() - started) - reserve;
     const limits = {firstMs: Math.min(provider.firstMs || FIRST_TEXT_MS, remaining), totalMs: remaining};
     if (limits.firstMs < MIN_ATTEMPT_MS) { failures.push({provider: provider.name, reason: "Skipped: not enough time left."}); continue; }
     let streamed = false;
@@ -400,7 +406,7 @@ async function geminiJson(key, model, system, prompt, timeoutMs = 8000, fetchImp
 }
 
 module.exports = {
-  ENDPOINTS, INSTRUCTION, GEMINI, REQUEST_BUDGET_MS, MIN_ATTEMPT_MS, HISTORY_ENTRIES, HISTORY_CHARS, MAX_TOOL_ROUNDS, MAX_TOOL_CALLS,
+  ENDPOINTS, INSTRUCTION, GEMINI, REQUEST_BUDGET_MS, BIG_BUDGET_MS, MIN_ATTEMPT_MS, HISTORY_ENTRIES, HISTORY_CHARS, MAX_TOOL_ROUNDS, MAX_TOOL_CALLS,
   cleanText, cleanMultiline, chatHistory, openAiMessages, geminiParts, systemText, providerFailure, finalAnswer, streamLines, sseData, trimToSentence, headerValue,
   BUILTIN_IDS, askGemini, askOpenAiCompatible, askAnthropic, noToolsSystem, builtinProvider, generalChatProviders, withFallback, geminiJson,
 };
