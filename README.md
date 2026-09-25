@@ -6,8 +6,15 @@ Live at **https://accaza-ai.web.app**.
 
 ## What it does
 
-- General chat with a backup chain: Gemini → Groq → Cerebras → DeepSeek → Qwen (Ollama on SUPERDAD) → Ashna. If one AI fails or times out, the next one answers.
-- Replies are cleaned into plain paragraphs and "• " / "1. " lists.
+- A ChatGPT-style chat:
+  - Replies stream in live, and a **Stop** button halts them.
+  - Replies are formatted with Markdown: headings, lists, tables, and code blocks with a copy button.
+  - There's **Copy** and **Regenerate** on answers, **Edit** on your last question, and dark mode.
+- **Saved chats** in a sidebar for registered users (owner, staff, members), with rename, delete and delete all. Guests' chats stay in their browser tab only.
+- Models:
+  - Owner and staff start on **Gemini 3.8 Flash**, then **Flash-Lite**.
+  - Members and guests start on **Flash-Lite**.
+  - Then everyone falls back through Groq → Cerebras → DeepSeek → Qwen (Ollama on SUPERDAD) → Ashna. If one AI fails or times out, the next one answers. If it fails part-way through a reply, the partial reply is cleared and the next one starts over.
 - Who can chat:
 
   | Who | How they get in | Daily limit |
@@ -25,14 +32,16 @@ Live at **https://accaza-ai.web.app**.
 - `functions/index.js`: the callables `chat` and `account` (region asia-southeast1, App Check enforced).
 - `functions/lib/providers.js`: the AI chain, timeouts and reply cleanup.
 - `functions/lib/access.js`: tiers, owner emails and daily limits.
+- `functions/lib/chats.js`: saved chats (create, regenerate, edit, list, rename, delete).
 - `firestore.rules`: browsers get no direct database access. Everything goes through the functions.
 - `tests/server.test.js`: unit tests.
 
 ## Data (Firestore, asia-southeast1)
 
 - `users/{uid}`: email, name, role (owner/staff/member), status, approval stamps.
+- `users/{uid}/chats/{chatId}` and `.../messages/{id}`: saved chats. Only the server reads or writes them, always under the caller's own uid.
 - `usage/{day}`: per-person and total message counts for members and guests (Manila day).
-- `chatLog/{id}`: who asked, which AI answered, and a SHA-256 hash of the question. The question text is never stored.
+- `chatLog/{id}`: analytics (who asked, which AI answered, and a SHA-256 hash of the question). The question text is not stored here.
 - `providerHealth/{day}`: backup answers and provider failures.
 - `adminLog/{id}`: staff approvals and removals.
 
@@ -46,8 +55,12 @@ firebase functions:secrets:set GEMINI_API_KEY --project accaza-ai
 
 ## Test and deploy
 
+Pushing to `main` deploys automatically (`.github/workflows/deploy.yml`). The login is keyless: GitHub OIDC uses Workload Identity Federation to act as the `github-deploy@accaza-ai` service account, and it only accepts `dmmagbual/Accaza-AI` on `main`. Pull requests run the tests only.
+
+To test locally, or deploy by hand in an emergency:
+
 ```powershell
 cd functions; npm install; cd ..
 npm test
-firebase deploy --project accaza-ai
+firebase deploy --project accaza-ai --account danilomagbual@gmail.com
 ```

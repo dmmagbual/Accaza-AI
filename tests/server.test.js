@@ -10,44 +10,98 @@ const provider = (name, ask, extra = {}) => Object.assign({name, enabled: () => 
 const ok = text => () => Promise.resolve(text);
 const failure = message => () => Promise.reject(AI.providerFailure(message));
 
-test("chain order is Gemini > Groq > Cerebras > DeepSeek > Qwen > Ashna", () => {
-  const names = AI.generalChatProviders("hi", [], {}).map(p => p.name).join(">");
-  assert.equal(names, "gemini>groq>cerebras>deepseek>ollama>ashna");
+test("chain order: staff get 3.8 Flash then Flash-Lite; others start on Flash-Lite", () => {
+  const staff = AI.generalChatProviders("hi", [], {}, "staff"), guest = AI.generalChatProviders("hi", [], {}, "guest");
+  assert.equal(staff.map(p => p.name).join(">"), "gemini>gemini-lite>groq>cerebras>deepseek>ollama>ashna");
+  assert.equal(staff[0].model, "gemini-3.8-flash");
+  assert.equal(guest.map(p => p.name).join(">"), "gemini>groq>cerebras>deepseek>ollama>ashna");
+  assert.equal(guest[0].model, "gemini-3.5-flash-lite");
+  assert.equal(AI.generalChatProviders("hi", [], {}, "member")[0].model, "gemini-3.5-flash-lite");
 });
 test("a normal first answer records nothing", async () => {
   let calls = 0;
-  const r = await AI.withFallback([provider("gemini", ok("A"))], async () => { calls += 1; });
+  const r = await AI.withFallback([provider("gemini", ok("A"))], {onUnusual: async () => { calls += 1; }});
   assert.equal(r.provider, "gemini"); assert.equal(r.answer, "A"); assert.equal(calls, 0);
 });
 test("a failed provider falls through and the backup is recorded", async () => {
   const seen = [];
-  const r = await AI.withFallback([provider("gemini", failure("quota")), provider("groq", ok("B"))], async (by, f) => seen.push([by, f.map(x => x.provider)]));
+  const r = await AI.withFallback([provider("gemini", failure("quota")), provider("groq", ok("B"))], {onUnusual: async (by, f) => seen.push([by, f.map(x => x.provider)])});
   assert.equal(r.provider, "groq"); assert.deepEqual(seen, [["groq", ["gemini"]]]);
 });
-test("a hung provider is cut off at its own limit", async () => {
-  const started = Date.now();
-  const hang = t => AI.fetchJson("Gemini", "https://10.255.255.1/", {}, t);
-  const r = await AI.withFallback([provider("gemini", hang, {maxMs: 8200}), provider("groq", ok("C"))], null);
-  assert.equal(r.provider, "groq"); assert.ok(Date.now() - started < 12000);
+test("a provider that fails mid-reply triggers one reset, then the next provider streams", async () => {
+  const events = [];
+  const partial = (limits, ctx) => { ctx.onDelta("Half an ans"); return Promise.reject(AI.providerFailure("cut")); };
+  const full = (limits, ctx) => { ctx.onDelta("Full "); ctx.onDelta("answer"); return Promise.resolve("Full answer"); };
+  const r = await AI.withFallback([provider("gemini", partial), provider("groq", full)], {onDelta: d => events.push(d), onReset: () => events.push("RESET")});
+  assert.equal(r.answer, "Full answer"); assert.deepEqual(events, ["Half an ans", "RESET", "Full ", "answer"]);
+});
+test("a failure before any text needs no reset", async () => {
+  const events = [];
+  await AI.withFallback([provider("gemini", failure("503")), provider("groq", ok("B"))], {onReset: () => events.push("RESET")});
+  assert.deepEqual(events, []);
 });
 test("a non-provider error is rethrown, never swallowed", async () => {
   let called = false;
-  await assert.rejects(AI.withFallback([provider("gemini", () => Promise.reject(new Error("boom"))), provider("groq", () => { called = true; return Promise.resolve("x"); })], null), /boom/);
+  await assert.rejects(AI.withFallback([provider("gemini", () => Promise.reject(new Error("boom"))), provider("groq", () => { called = true; return Promise.resolve("x"); })]), /boom/);
   assert.equal(called, false);
 });
 test("when every provider fails the user gets one clear message and it is recorded", async () => {
   const seen = [];
-  await assert.rejects(AI.withFallback([provider("gemini", failure("a")), provider("groq", failure("b"))], async (by, f) => seen.push([by, f.length])), e => e.code === "unavailable" && /temporarily unavailable/.test(e.message));
+  await assert.rejects(AI.withFallback([provider("gemini", failure("a")), provider("groq", failure("b"))], {onUnusual: async (by, f) => seen.push([by, f.length])}), e => e.code === "unavailable" && /temporarily unavailable/.test(e.message));
   assert.deepEqual(seen, [[null, 2]]);
 });
-test("replies are cleaned into plain paragraphs and lists", () => {
-  const out = AI.proseAnswer("## Title\n**Bold** text\n- one\n* two\n1) first\n2*3*4 stays");
-  assert.equal(out, "Title\nBold text\n\n• one\n• two\n1. first\n\n2*3*4 stays");
-  assert.throws(() => AI.proseAnswer("   "), e => e.details && e.details.providerFailure === true);
+test("answers keep Markdown and line breaks; empty answers fall through", () => {
+  assert.equal(AI.finalAnswer("## Title\n\n- one\n\n```js\nx = 1\n```\r\n"), "## Title\n\n- one\n\n```js\nx = 1\n```");
+  assert.throws(() => AI.finalAnswer("  \n "), e => e.details && e.details.providerFailure === true);
 });
-test("history keeps the last 8 turns and trims each to 800 characters", () => {
-  const h = AI.chatHistory(Array.from({length: 12}, (_, i) => ({role: i % 2 ? "model" : "user", text: "x".repeat(900)})));
-  assert.equal(h.length, 8); assert.ok(h.every(r => r.text.length === 800));
+test("history keeps the last 12 turns, 1,500 characters each, with line breaks", () => {
+  const h = AI.chatHistory(Array.from({length: 20}, (_, i) => ({role: i % 2 ? "model" : "user", text: "line\n" + "x".repeat(2000)})));
+  assert.equal(h.length, 12); assert.ok(h.every(r => r.text.length === 1500 && r.text.startsWith("line\n")));
+});
+
+// Streaming parsers against a local HTTP server (no internet needed).
+const http = require("node:http");
+function serve(handler) {
+  return new Promise(resolve => { const server = http.createServer(handler).listen(0, "127.0.0.1", () => resolve(server)); });
+}
+test("streamLines reads SSE lines and one-shot JSON bodies", async () => {
+  const server = await serve((req, res) => {
+    if (req.url === "/sse") { res.writeHead(200, {"content-type": "text/event-stream"}); res.write('data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n'); setTimeout(() => { res.end('data: {"choices":[{"delta":{"content":"lo"}}]}\n\ndata: [DONE]\n'); }, 30); return; }
+    res.writeHead(200, {"content-type": "application/json"}); res.end('{"choices":[{"message":{"content":"Whole"}}]}');
+  });
+  const base = `http://127.0.0.1:${server.address().port}`, got = [];
+  const collect = (line, body, mark) => { const d = body || AI.sseData(line); const c = d && d.choices[0]; const t = c && ((c.delta && c.delta.content) || (c.message && c.message.content)); if (t) { mark(); got.push(t); } };
+  await AI.streamLines("X", base + "/sse", {}, {firstMs: 2000, totalMs: 5000}, collect);
+  await AI.streamLines("X", base + "/json", {}, {firstMs: 2000, totalMs: 5000}, collect);
+  server.close();
+  assert.deepEqual(got, ["Hel", "lo", "Whole"]);
+});
+test("streamLines cuts off a provider that sends no text in time, and reports HTTP errors", async () => {
+  const server = await serve((req, res) => {
+    if (req.url === "/slow") { res.writeHead(200, {"content-type": "text/event-stream"}); return; }
+    res.writeHead(503, {"content-type": "application/json"}); res.end('{"error":{"message":"high demand"}}');
+  });
+  const base = `http://127.0.0.1:${server.address().port}`, started = Date.now();
+  await assert.rejects(AI.streamLines("Gemini", base + "/slow", {}, {firstMs: 1200, totalMs: 5000}, () => {}), e => e.details.providerFailure && /did not answer within/.test(e.message));
+  assert.ok(Date.now() - started < 3000);
+  await assert.rejects(AI.streamLines("Gemini", base + "/busy", {}, {firstMs: 2000, totalMs: 5000}, () => {}), e => e.details.providerFailure && /high demand/.test(e.message));
+  server.close();
+});
+
+const Chats = require("../functions/lib/chats");
+test("regenerate re-asks the last question; edit replaces it; both drop the old answer", () => {
+  const msgs = [{id: "u1", role: "user", text: "Q1"}, {id: "m1", role: "model", text: "A1"}, {id: "u2", role: "user", text: "Q2"}, {id: "m2", role: "model", text: "A2"}];
+  const regen = Chats.planTurn(msgs, "regenerate", "ignored");
+  assert.equal(regen.question, "Q2"); assert.deepEqual(regen.remove.map(m => m.id), ["m2"]); assert.equal(regen.keepUser.id, "u2"); assert.equal(regen.history.length, 2);
+  const edit = Chats.planTurn(msgs, "edit", "Q2 fixed");
+  assert.equal(edit.question, "Q2 fixed"); assert.deepEqual(edit.remove.map(m => m.id), ["u2", "m2"]); assert.equal(edit.keepUser, null);
+  assert.throws(() => Chats.planTurn([], "regenerate", ""), e => e.code === "failed-precondition");
+  assert.equal(Chats.planTurn(msgs, "new", "Q3").history.length, 4);
+});
+test("chat titles and ids are cleaned", () => {
+  assert.equal(Chats.titleFrom("  How   do I\nmake cold brew?  "), "How do I make cold brew?");
+  assert.equal(Chats.titleFrom("x".repeat(100)).length, 58);
+  assert.equal(Chats.cleanId("../users/other"), ""); assert.equal(Chats.cleanId("AbC_12-x"), "AbC_12-x");
 });
 
 // Minimal in-memory Firestore for the access rules.
