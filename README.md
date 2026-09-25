@@ -65,6 +65,17 @@ Live at **https://accaza-ai.web.app**.
 
   Members and guests also share a ceiling of 100 messages a day in total.
 
+## Laptop tasks (owner only)
+
+Cowork-style tasks run on the owner's laptop (SUPERDAD), not in Cloud Functions. See `worker/README.md` for setup and security.
+
+- Turn on **⚙ Task** in the chat box, describe the job and optionally attach files (PDF, images, CSV, Excel, Word, PowerPoint, text, JSON, zip; up to 5 files, 10 MB each, 15 MB in total).
+- The laptop worker plans the job, then writes and runs code in a Docker sandbox that has no network. It builds Word, Excel, PowerPoint and PDF files and charts, researches with `web_search`/`open_url`, can use your skills, checks its work, and delivers the files in `outputs/`.
+- The task card in the chat shows the plan checklist, a live activity log (with code and output), any question from the task (it pauses until you answer), **Stop**, and **Download** for each file. **Tasks** in the sidebar lists every task, shows whether the laptop is online, and lets you delete finished tasks.
+- Tasks in the same chat share one workspace, so a follow-up task can build on earlier files.
+- When the laptop is off, tasks wait in the queue and start once it is back online.
+- Deleting a chat, or all chats, also deletes its tasks and their files. Task files are also deleted automatically after 90 days.
+
 ## Canvas and published sites
 
 - Signed-in users can ask for a web page, website, app, game or dashboard. The AI builds it in a **canvas** beside the chat instead of pasting code.
@@ -96,8 +107,10 @@ Live at **https://accaza-ai.web.app**.
 - `functions/lib/canvas.js`: canvas storage, versions, AI canvas tools, page builder, publishing, and the `sites` function that serves published pages.
 - `sites-public/`: static files for the accaza-sites Hosting site (everything else goes to the `sites` function).
 - `functions/lib/chats.js`: saved chats (create, regenerate, edit, list, rename, delete).
+- `functions/lib/tasks.js` and the `tasks` callable: laptop tasks (create, list, get with events, stop, reply, download, delete). This code is shared with the worker.
+- `worker/`: the laptop worker. `index.js` is the queue, claims and outputs. `lib/agent.js` is the step loop. `lib/models.js` is the model chain. `lib/sandbox.js` handles Docker. `lib/toolset.js` has the tools. `sandbox/` is the container image.
 - `firestore.rules`: browsers get no direct database access. Everything goes through the functions.
-- `tests/server.test.js`: unit tests.
+- `tests/server.test.js` and `tests/tasks.test.js`: unit tests (`npm test`). On the laptop, `node worker/scripts/sandbox-selftest.js` checks the sandbox isolation.
 
 ## Data (Firestore, asia-southeast1)
 
@@ -109,6 +122,8 @@ Live at **https://accaza-ai.web.app**.
 - `searchUsage/{day}`: web search caps.
 - `users/{uid}/connectors/{google|mcp_*}` and `oauthStates/{state}`: connectors (tokens encrypted) and one-time OAuth states.
 - `users/{uid}/canvases/{id}` and `.../versions/{n}`: canvases and their versions.
+- `tasks/{id}` (owner's uid, status, plan, question, outputs…) and `tasks/{id}/events/{seq}`: laptop tasks and their activity. `workers/{id}`: laptop heartbeat. `taskLog/{id}`: one row per finished task (status, steps, time, error).
+- Cloud Storage `gs://accaza-ai-task-files/tasks/{id}/inputs|outputs/`: task files, deleted after 90 days.
 - `sites/{slug}` and `siteAssets/{id}`: published pages (built HTML) and site photos.
 - `usage/{day}`: per-person and total message counts for members and guests (Manila day).
 - `chatLog/{id}`: analytics (who asked, which AI answered, and a SHA-256 hash of the question). The question text is not stored here.

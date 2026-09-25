@@ -406,7 +406,7 @@ async function geminiJson(key, model, system, prompt, timeoutMs = 8000, fetchImp
 }
 
 module.exports = {
-  ENDPOINTS, INSTRUCTION, GEMINI, REQUEST_BUDGET_MS, BIG_BUDGET_MS, MIN_ATTEMPT_MS, HISTORY_ENTRIES, HISTORY_CHARS, MAX_TOOL_ROUNDS, MAX_TOOL_CALLS,
+  ENDPOINTS, INSTRUCTION, GEMINI, GROQ, CEREBRAS, DEEPSEEK, REQUEST_BUDGET_MS, BIG_BUDGET_MS, MIN_ATTEMPT_MS, HISTORY_ENTRIES, HISTORY_CHARS, MAX_TOOL_ROUNDS, MAX_TOOL_CALLS,
   cleanText, cleanMultiline, chatHistory, openAiMessages, geminiParts, systemText, providerFailure, finalAnswer, streamLines, sseData, trimToSentence, headerValue,
   BUILTIN_IDS, askGemini, askOpenAiCompatible, askAnthropic, noToolsSystem, builtinProvider, generalChatProviders, withFallback, geminiJson,
 };

@@ -1,0 +1,12 @@
+{
+  "workerId": "superdad",
+  "ownerEmail": "danilomagbual@gmail.com",
+  "projectId": "accaza-ai",
+  "serviceAccountFile": "C:\\Users\\Danilo Magbual\\.accaza-ai\\worker-key.json",
+  "limits": {"maxSteps": 40, "maxMinutes": 30},
+  "sandbox": {"memory": "2g", "cpus": 2, "pids": 256},
+  "keepAwake": true,
+  "folders": [
+    {"name": "Shared", "path": "C:\\AKALIKO\\DMM\\PERSONAL\\AccazaAI-Shared", "write": false}
+  ]
+}
