@@ -1,0 +1,63 @@
+name: Test and deploy
+
+# Pull requests: tests only. Push to main: tests, then deploy to Firebase project accaza-ai.
+# Login is keyless: GitHub's short-lived OIDC token is exchanged for the github-deploy
+# service account through Workload Identity Federation. Google only accepts tokens from
+# dmmagbual/Accaza-AI on refs/heads/main, and that account can only reach accaza-ai.
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: accaza-ai-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - name: Install function dependencies
+        working-directory: functions
+        run: npm ci --no-audit --no-fund
+      - name: Unit tests
+        run: npm test
+      - name: Check web app script syntax
+        run: node -e "const s=require('fs').readFileSync('public/index.html','utf8');const m=s.match(/<script type=\"module\">([\s\S]*?)<\/script>/);require('fs').writeFileSync('app-check.mjs',m[1].replace(/^import\{/gm,'//import{').replace(/^import /gm,'//import '));" && node --check app-check.mjs
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - name: Install function dependencies
+        working-directory: functions
+        run: npm ci --no-audit --no-fund
+      - name: Sign in to Google Cloud (keyless)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/602785905482/locations/global/workloadIdentityPools/github/providers/accaza-ai-repo
+          service_account: github-deploy@accaza-ai.iam.gserviceaccount.com
+      - name: Deploy functions, Firestore rules and hosting
+        run: npx --yes firebase-tools@latest deploy --project accaza-ai --non-interactive --force
