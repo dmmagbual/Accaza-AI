@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'"/>
-<meta name="accaza-ai-build" content="6"/>
+<meta name="accaza-ai-build" content="7"/>
 <meta name="description" content="Accaza AI — a general-chat AI assistant."/>
 <meta name="theme-color" content="#19241b"/>
 <title>Accaza AI</title>
@@ -148,6 +148,24 @@
   body.dragging #dropHint{display:flex;}
   .hint{max-width:760px;margin:.35rem auto 0;text-align:center;font-size:.68rem;color:var(--muted);}
 
+  /* Settings: personalise + memory */
+  #settingsWrap{display:none;flex:1;min-height:0;overflow:auto;padding:1rem;}
+  #settingsInner{max-width:720px;margin:0 auto;}
+  #settingsWrap h2{font-family:'Playfair Display',serif;font-size:1.25rem;margin:0 0 .7rem;color:var(--accent-ink);}
+  .tabs{display:flex;gap:.3rem;border-bottom:1px solid var(--line);margin-bottom:1rem;}
+  .tabs button{background:transparent;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:.5rem .8rem;cursor:pointer;font-weight:600;font-size:.85rem;}
+  .tabs button.on{color:var(--ink);border-bottom-color:var(--accent);}
+  .field{margin-bottom:1rem;} .field label{display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem;} .field small{display:block;color:var(--muted);font-size:.74rem;margin-bottom:.35rem;line-height:1.4;}
+  .field textarea,.field input[type=text]{width:100%;border:1px solid var(--input-line);background:var(--input);color:var(--ink);border-radius:8px;padding:.55rem .65rem;font:inherit;font-size:.86rem;resize:vertical;}
+  .toggle{display:flex;align-items:flex-start;gap:.55rem;font-size:.84rem;margin:.55rem 0;} .toggle input{margin-top:.2rem;} .toggle small{display:block;color:var(--muted);font-size:.74rem;}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:.55rem .9rem;font-weight:700;font-size:.84rem;cursor:pointer;}
+  .btn.ghost{background:transparent;color:var(--danger);border:1px solid var(--danger);}
+  .btn:disabled{opacity:.6;cursor:default;}
+  .saved{font-size:.78rem;color:var(--ok);margin-left:.6rem;}
+  .memRow{display:flex;align-items:center;gap:.5rem;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:.5rem .6rem;margin-bottom:.4rem;font-size:.85rem;}
+  .memRow span{flex:1;min-width:0;overflow-wrap:anywhere;} .memRow button{background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:.85rem;}
+  .memAdd{display:flex;gap:.4rem;margin-bottom:.8rem;} .memAdd input{flex:1;}
+  .memNote{display:inline-block;margin-top:.35rem;font-size:.72rem;color:var(--accent-ink);background:var(--accent-soft);border-radius:99px;padding:.15rem .55rem;cursor:pointer;border:0;}
   /* Owner: staff panel */
   #staffWrap{display:none;flex:1;min-height:0;overflow:auto;padding:1rem;}
   #staffInner{max-width:760px;margin:0 auto;}
@@ -191,6 +209,7 @@
     <div id="sideFoot">
       <div class="who" id="whoLine"></div>
       <div class="row">
+        <button id="settingsBtn" type="button" style="display:none">Settings</button>
         <button id="themeBtn" type="button">Theme: auto</button>
         <button id="deleteAllBtn" type="button" style="display:none">Delete all chats</button>
       </div>
@@ -283,6 +302,25 @@
     </div>
   </div>
 
+  <div id="settingsWrap">
+    <div id="settingsInner">
+      <h2>Settings</h2>
+      <div class="tabs"><button type="button" id="tabPersonal" class="on">Personalise</button><button type="button" id="tabMemory">Memory</button></div>
+      <div id="panePersonal">
+        <div class="field"><label for="aboutMe">About you</label><small>What should Accaza AI know about you? For example your work, your business, your goals.</small><textarea id="aboutMe" rows="4" maxlength="1500"></textarea></div>
+        <div class="field"><label for="replyStyle">How should Accaza AI reply?</label><small>Tone, length, format. For example "Short answers, bullet points, prices in PHP".</small><textarea id="replyStyle" rows="3" maxlength="1500"></textarea></div>
+        <label class="toggle"><input type="checkbox" id="useMemory"/><span>Use memory<small>Let Accaza AI use what it remembers about you in every chat.</small></span></label>
+        <label class="toggle"><input type="checkbox" id="learnMemory"/><span>Learn from chats<small>Save useful facts automatically. You can always say "remember that…" or "forget…".</small></span></label>
+        <button class="btn" type="button" id="saveSettingsBtn">Save</button><span class="saved" id="settingsSaved"></span>
+      </div>
+      <div id="paneMemory" style="display:none">
+        <div class="memAdd"><input type="text" id="newMemory" maxlength="200" placeholder="Add something to remember, e.g. I prefer prices in PHP"/><button class="btn" type="button" id="addMemoryBtn">Add</button></div>
+        <div class="err" id="memoryErr"></div>
+        <div id="memoryList"></div>
+        <div style="margin-top:1rem"><button class="btn ghost" type="button" id="deleteMemoriesBtn">Delete all memories</button></div>
+      </div>
+    </div>
+  </div>
   <div id="dropHint">Drop photos or PDFs to attach</div>
   <div id="staffWrap">
     <div id="staffInner">
@@ -337,10 +375,10 @@ async function copyText(text,button){
 }
 
 // ---------- Views ----------
-const VIEWS=['loginWrap','registerWrap','resetWrap','verifyWrap','chatWrap','staffWrap'];
+const VIEWS=['loginWrap','registerWrap','resetWrap','verifyWrap','chatWrap','staffWrap','settingsWrap'];
 function show(view){
-  VIEWS.forEach(v=>{by(v).style.display=v===view?(v==='staffWrap'?'block':'flex'):'none';});
-  const inApp=view==='chatWrap'||view==='staffWrap';
+  VIEWS.forEach(v=>{by(v).style.display=v===view?(v==='staffWrap'||v==='settingsWrap'?'block':'flex'):'none';});
+  const inApp=view==='chatWrap'||view==='staffWrap'||view==='settingsWrap';
   by('topbarActions').style.display=inApp?'flex':'none';by('sidebar').style.display=inApp?'flex':'none';by('menuBtn').style.visibility=inApp?'visible':'hidden';
   closeSide();
 }
@@ -414,6 +452,7 @@ function refreshActions(){
     if(!t.actions)return;t.actions.replaceChildren();
     if(t.pending)return;
     if(t.role==='model'&&!t.error){
+      if(t.memory){const n=document.createElement('button');n.type='button';n.className='memNote';n.textContent='Memory updated ✓';n.title=t.memory;n.addEventListener('click',()=>openSettings('memory'));t.actions.append(n);}
       t.actions.append(actionButton('Copy',e=>copyText(t.text,e.currentTarget)));
       if(t===lastAi&&answeredLast&&!busy)t.actions.append(actionButton('Regenerate',()=>send('regenerate')));
     }
@@ -483,6 +522,8 @@ async function send(mode){
     for(let i=0;i<60&&shown<text.length;i++)await new Promise(r=>setTimeout(r,16));
     text=result.answer||text;ai.pending=false;ai.text=text;paint(ai.bubble,text,false);ai.bubble.classList.remove('pending');
     if(result.tier)ME.tier=result.tier;setAllowance(result.allowance?result.allowance.remaining:null);
+    const mem=result.memory;
+    if(mem&&(mem.added.length||mem.updated.length||mem.removed.length)){ai.memory=[...mem.added.map(m=>'Saved: '+m.text),...mem.updated.map(m=>'Updated: '+m.text),...(mem.removed.length?[mem.removed.length+' removed']:[])].join('\n');}
     if(result.chatId){
       if(!current||current.id!==result.chatId){current={id:result.chatId,title:result.title||question.slice(0,60)};}
       chats=[{id:current.id,title:current.title},...chats.filter(c=>c.id!==current.id)];renderChatList();
@@ -565,6 +606,50 @@ async function loadChats(){
   let last='';try{last=sessionStorage.getItem(LAST_CHAT)||'';}catch(e){}
   if(last&&chats.some(c=>c.id===last))openChat(last,true);
 }
+
+// ---------- Settings: personalise + memory ----------
+function openSettings(tab){show('settingsWrap');selectTab(tab||'personal');loadSettings();}
+function selectTab(tab){const mem=tab==='memory';by('tabPersonal').classList.toggle('on',!mem);by('tabMemory').classList.toggle('on',mem);by('panePersonal').style.display=mem?'none':'block';by('paneMemory').style.display=mem?'block':'none';}
+by('tabPersonal').addEventListener('click',()=>selectTab('personal'));
+by('tabMemory').addEventListener('click',()=>selectTab('memory'));
+by('settingsBtn').addEventListener('click',()=>{if(by('settingsWrap').style.display==='block')show('chatWrap');else openSettings('personal');});
+function renderMemories(list){
+  const box=by('memoryList');box.replaceChildren();
+  if(!list.length){const n=document.createElement('div');n.className='sideNote';n.textContent='Nothing saved yet. Accaza AI will remember useful things you tell it, or add one above.';box.appendChild(n);return;}
+  list.forEach(m=>{
+    const row=document.createElement('div'),text=document.createElement('span'),del=document.createElement('button');
+    row.className='memRow';text.textContent=m.text;del.type='button';del.textContent='✕';del.title='Delete';
+    del.addEventListener('click',async()=>{del.disabled=true;try{await accountCall({action:'deleteMemory',memoryId:m.id});row.remove();}catch(e){del.disabled=false;}});
+    row.append(text,del);box.appendChild(row);
+  });
+}
+async function loadSettings(){
+  showMsg('memoryErr','');by('settingsSaved').textContent='';
+  try{
+    const d=(await accountCall({action:'getSettings'})).data||{},st=d.settings||{};
+    by('aboutMe').value=st.aboutMe||'';by('replyStyle').value=st.replyStyle||'';by('useMemory').checked=st.useMemory!==false;by('learnMemory').checked=st.learn!==false;
+    renderMemories(d.memories||[]);
+  }catch(e){showMsg('memoryErr',cleanErr(e,'Could not load settings.'));}
+}
+by('saveSettingsBtn').addEventListener('click',async()=>{
+  const b=by('saveSettingsBtn');b.disabled=true;by('settingsSaved').textContent='';
+  try{await accountCall({action:'saveSettings',settings:{aboutMe:by('aboutMe').value,replyStyle:by('replyStyle').value,useMemory:by('useMemory').checked,learn:by('learnMemory').checked}});by('settingsSaved').textContent='Saved ✓';}
+  catch(e){by('settingsSaved').textContent=cleanErr(e,'Could not save.');}
+  b.disabled=false;
+});
+by('addMemoryBtn').addEventListener('click',async()=>{
+  const input=by('newMemory'),text=input.value.trim();if(!text)return;showMsg('memoryErr','');
+  try{await accountCall({action:'addMemory',text});input.value='';loadSettings();}catch(e){showMsg('memoryErr',cleanErr(e,'Could not save that.'));}
+});
+by('newMemory').addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();by('addMemoryBtn').click();}});
+let armedMem=0;
+by('deleteMemoriesBtn').addEventListener('click',async()=>{
+  const b=by('deleteMemoriesBtn');
+  if(!armedMem){armedMem=setTimeout(()=>{armedMem=0;b.textContent='Delete all memories';},3000);b.textContent='Tap again to delete all';return;}
+  clearTimeout(armedMem);armedMem=0;b.disabled=true;
+  try{await accountCall({action:'deleteAllMemories'});renderMemories([]);}catch(e){showMsg('memoryErr',cleanErr(e,'Could not delete.'));}
+  b.disabled=false;b.textContent='Delete all memories';
+});
 
 // ---------- Attachments (photos and PDFs) ----------
 // Files upload as soon as they are picked, pasted or dropped; the message then refers to them by id.
@@ -739,7 +824,7 @@ async function render(user){
   }
   const changed=user.uid!==lastUid;lastUid=user.uid;
   by('signOutBtn').textContent=user.isAnonymous?'Exit guest':'Sign out';
-  by('staffBtn').style.display='none';by('staffBtn').textContent='Staff';
+  by('staffBtn').style.display='none';by('staffBtn').textContent='Staff';by('settingsBtn').style.display='none';
   ME={tier:user.isAnonymous?'guest':'member'};setAllowance(null);
   by('whoLine').textContent=user.isAnonymous?'Guest':(user.displayName||user.email||'');
   if(changed){current=null;chats=[];turns=user.isAnonymous?loadGuestTurns():[];}
@@ -749,6 +834,7 @@ async function render(user){
     if(me.tier==='unverified'){show('verifyWrap');return;}
     ME=me;setAllowance(me.remaining);
     if(me.tier==='owner')by('staffBtn').style.display='inline-block';
+    by('settingsBtn').style.display=saves()?'inline-block':'none';
     by('whoLine').textContent=user.isAnonymous?'Guest':((me.name||user.email||'')+' · '+me.tier);
     if(saves()&&changed)await loadChats();else renderChatList();
   }catch(e){console.warn('account check failed',e);}

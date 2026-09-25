@@ -12,10 +12,11 @@ const AI = require("./lib/providers");
 const Access = require("./lib/access");
 const Chats = require("./lib/chats");
 const Files = require("./lib/files");
+const Memory = require("./lib/memory");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.2";
+const RELEASE_VERSION = "1.3";
 const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
@@ -114,9 +115,12 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256M
   const now = Date.now(), day = Access.manilaDay(now), limited = !Access.unlimited(account.tier);
   const allowance = limited ? await Access.claimMessage(db, account.uid, day, now) : null;
   const history = plan.history;
+  // Personalisation for registered users: "About me", reply preferences and saved memories.
+  const [settings, memories] = saves ? await Promise.all([Memory.loadSettings(db, account.uid), Memory.listMemories(db, account.uid)]) : [Memory.DEFAULT_SETTINGS, []];
+  const system = saves ? Memory.personalBlock(settings, memories) : "";
   let result;
   try {
-    result = await AI.withFallback(AI.generalChatProviders(question, history, KEYS, account.tier, files), {
+    result = await AI.withFallback(AI.generalChatProviders({question, history, keys: KEYS, tier: account.tier, files, system}), {
       onDelta: piece => { response.sendChunk({delta: piece}).catch(() => {}); },
       onReset: () => { response.sendChunk({reset: true}).catch(() => {}); },
       onUnusual: (answeredBy, failures) => recordProviderHealth(db, account.tier, answeredBy, failures),
@@ -126,9 +130,15 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256M
     throw error;
   }
   const saved = saves ? await Chats.saveTurn(db, account.uid, chat, plan, result, now) : null;
+  // Learn from this exchange (never blocks or fails the answer).
+  let memory = null;
+  if (saves) {
+    try { memory = await Memory.learnFromTurn({db, uid: account.uid, settings, memories, question, answer: result.answer, chatId: saved && saved.chatId, key: AI.headerValue(GEMINI_API_KEY.value()), now, extract: AI.geminiJson}); }
+    catch (error) { console.warn(JSON.stringify({event: "memory_learn_failed", message: String(error && error.message || error).slice(0, 200)})); }
+  }
   // The analytics log keeps who asked, which AI answered and a hash of the question, never the text.
   await db.collection("chatLog").add({at: now, day, uid: account.uid, tier: account.tier, mode, files: files.length, provider: result.provider, model: result.model, backupsTried: result.failures.length, questionHash: crypto.createHash("sha256").update(question).digest("hex"), used: allowance ? allowance.used : null});
-  return {answer: result.answer, provider: result.provider, model: result.model, tier: account.tier, allowance, attachments: files.map(Files.publicFile), chatId: saved && saved.chatId, title: saved && saved.title, userMessageId: saved && saved.userMessageId, modelMessageId: saved && saved.modelMessageId, releaseVersion: RELEASE_VERSION};
+  return {answer: result.answer, provider: result.provider, model: result.model, tier: account.tier, allowance, attachments: files.map(Files.publicFile), memory, chatId: saved && saved.chatId, title: saved && saved.title, userMessageId: saved && saved.userMessageId, modelMessageId: saved && saved.modelMessageId, releaseVersion: RELEASE_VERSION};
 });
 
 // Account actions. "me" registers the caller on first use and reports their tier and today's
@@ -165,9 +175,14 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
     renameChat: () => Chats.renameChat(db, actor.uid, data.chatId, data.title),
     deleteChat: async () => { const out = await Chats.deleteChat(db, actor.uid, data.chatId); out.filesDeleted = await purgeUploads(db, actor.uid, out.fileIds); delete out.fileIds; return out; },
     deleteAllChats: async () => { const out = await Chats.deleteAllChats(db, actor.uid); out.filesDeleted = await purgeUploads(db, actor.uid, null); return out; },
+    getSettings: async () => ({settings: await Memory.loadSettings(db, actor.uid), memories: await Memory.listMemories(db, actor.uid)}),
+    saveSettings: async () => ({settings: await Memory.saveSettings(db, actor.uid, data.settings || {}, now)}),
+    addMemory: () => Memory.addMemory(db, actor.uid, data.text, now),
+    deleteMemory: () => Memory.deleteMemory(db, actor.uid, data.memoryId),
+    deleteAllMemories: () => Memory.deleteAllMemories(db, actor.uid),
   };
   if (chatActions[action]) {
-    if (actor.tier === "guest") throw new HttpsError("failed-precondition", "Sign in to save and open chats.");
+    if (actor.tier === "guest") throw new HttpsError("failed-precondition", "Sign in to save chats and use memory.");
     return chatActions[action]();
   }
   if (actor.tier !== "owner") throw new HttpsError("permission-denied", "Only the owner can manage staff.");
