@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'"/>
-<meta name="accaza-ai-build" content="8"/>
+<meta name="accaza-ai-build" content="9"/>
 <meta name="description" content="Accaza AI — a general-chat AI assistant."/>
 <meta name="theme-color" content="#19241b"/>
 <title>Accaza AI</title>
@@ -185,6 +185,9 @@
   #skillMenu button.on,#skillMenu button:hover{background:var(--side-hover);}
   .skillChip{display:inline-flex;align-items:center;gap:.35rem;background:var(--accent-soft);color:var(--accent-ink);border-radius:99px;padding:.2rem .3rem .2rem .6rem;font-size:.76rem;font-weight:600;}
   .skillChip button{background:transparent;border:0;color:inherit;cursor:pointer;}
+  .srcs{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.45rem;}
+  .srcs a{font-size:.72rem;text-decoration:none;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:.2rem .55rem;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .srcs a:hover{border-color:var(--accent);}
   .toolLine{font-size:.74rem;color:var(--muted);margin:.1rem 0 .3rem;}
   .toolLine.live::before{content:'⚙ ';}
   /* Owner: staff panel */
@@ -469,11 +472,16 @@ function setAllowance(remaining){
 let chats=[],current=null,turns=[],busy=false,controller=null,editing=false;
 const GUEST_TURNS='accaza_ai_guest_turns_v2',LAST_CHAT='accaza_ai_last_chat';
 function fileMeta(f){return {id:f.id,displayName:f.displayName,mimeType:f.mimeType,expiresAt:f.expiresAt};}
-function saveGuestTurns(){if(saves())return;try{sessionStorage.setItem(GUEST_TURNS,JSON.stringify(turns.slice(-24).map(t=>({role:t.role,text:t.text,attachments:(t.attachments||[]).map(fileMeta)}))));}catch(e){}}
+function saveGuestTurns(){if(saves())return;try{sessionStorage.setItem(GUEST_TURNS,JSON.stringify(turns.slice(-24).map(t=>({role:t.role,text:t.text,attachments:(t.attachments||[]).map(fileMeta),sources:t.sources||[]}))));}catch(e){}}
 function loadGuestTurns(){try{const r=JSON.parse(sessionStorage.getItem(GUEST_TURNS)||'[]');return Array.isArray(r)?r:[];}catch(e){return [];}}
 function nearBottom(){const s=by('scroller');return s.scrollHeight-s.scrollTop-s.clientHeight<120;}
 function toBottom(force){const s=by('scroller');if(force||nearBottom())s.scrollTop=s.scrollHeight;}
 
+function sourcesEl(list){
+  const box=document.createElement('div');box.className='srcs';
+  (list||[]).slice(0,12).forEach((src,i)=>{const a=document.createElement('a');a.href=src.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=(i+1)+'. '+(src.title||src.url);a.title=src.url;box.appendChild(a);});
+  return box;
+}
 function turnEl(turn){
   const wrap=document.createElement('div'),bubble=document.createElement('div'),actions=document.createElement('div');
   wrap.className='turn '+(turn.role==='user'?'user':'ai');bubble.className='bubble';actions.className='actions';
@@ -488,7 +496,9 @@ function turnEl(turn){
   }
   if(turn.role==='model'&&turn.tools&&turn.tools.length){const tl=document.createElement('div');tl.className='toolLine';tl.textContent='Used: '+turn.tools.map(t=>t.label).join(' · ');wrap.appendChild(tl);}
   if(turn.role==='user'){bubble.textContent=turn.text;if(!turn.text)bubble.style.display='none';}else if(turn.error){bubble.classList.add('error');bubble.textContent=turn.text;}else paint(bubble,turn.text,false);
-  wrap.append(bubble,actions);turn.el=wrap;turn.bubble=bubble;turn.actions=actions;return wrap;
+  wrap.append(bubble);
+  if(turn.role==='model'&&turn.sources&&turn.sources.length){turn.srcEl=sourcesEl(turn.sources);wrap.appendChild(turn.srcEl);}
+  wrap.append(actions);turn.el=wrap;turn.bubble=bubble;turn.actions=actions;return wrap;
 }
 function renderTurns(){
   const box=by('messages');box.replaceChildren(...turns.map(turnEl));
@@ -572,6 +582,7 @@ async function send(mode){
     const {stream,data}=await chatCall.stream(payload,{signal:controller.signal});
     for await(const chunk of stream){
       if(chunk&&chunk.tool){showTool(chunk.tool);continue;}
+      if(chunk&&chunk.sources){ai.sources=chunk.sources;const el=sourcesEl(chunk.sources);if(ai.srcEl)ai.srcEl.replaceWith(el);else ai.el.insertBefore(el,ai.actions);ai.srcEl=el;continue;}
       if(chunk&&chunk.reset){text='';shown=0;}else if(chunk&&chunk.delta)text+=chunk.delta;
       if(!frame)frame=setTimeout(draw,16);
     }
@@ -581,6 +592,7 @@ async function send(mode){
     text=result.answer||text;ai.pending=false;ai.text=text;paint(ai.bubble,text,false);ai.bubble.classList.remove('pending');
     if(result.tier)ME.tier=result.tier;setAllowance(result.allowance?result.allowance.remaining:null);
     if(toolLine){toolLine.remove();toolLine=null;}
+    if(result.sources&&result.sources.length){ai.sources=result.sources;const el=sourcesEl(result.sources);if(ai.srcEl)ai.srcEl.replaceWith(el);else ai.el.insertBefore(el,ai.actions);ai.srcEl=el;}
     if(result.tools&&result.tools.length){ai.tools=result.tools;const tl=document.createElement('div');tl.className='toolLine';tl.textContent='Used: '+result.tools.map(t=>t.label).join(' · ');ai.el.insertBefore(tl,ai.bubble);}
     const mem=result.memory;
     if(mem&&(mem.added.length||mem.updated.length||mem.removed.length)){ai.memory=[...mem.added.map(m=>'Saved: '+m.text),...mem.updated.map(m=>'Updated: '+m.text),...(mem.removed.length?[mem.removed.length+' removed']:[])].join('\n');}
@@ -613,7 +625,7 @@ async function openChat(id,quiet){
   if(busy)return;
   try{
     const data=(await accountCall({action:'messages',chatId:id})).data||{};
-    current={id:data.chat.id,title:data.chat.title};turns=(data.messages||[]).map(m=>({role:m.role,text:m.text,id:m.id,attachments:m.attachments||[]}));
+    current={id:data.chat.id,title:data.chat.title};turns=(data.messages||[]).map(m=>({role:m.role,text:m.text,id:m.id,attachments:m.attachments||[],sources:m.sources||[]}));
     cancelEdit();renderTurns();renderChatList();show('chatWrap');try{sessionStorage.setItem(LAST_CHAT,id);}catch(e){}
   }catch(e){if(!quiet){chats=chats.filter(c=>c.id!==id);renderChatList();}newChat();}
 }

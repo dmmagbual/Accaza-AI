@@ -15,10 +15,11 @@ const Files = require("./lib/files");
 const Memory = require("./lib/memory");
 const Skills = require("./lib/skills");
 const {combineTools} = require("./lib/tools");
+const Web = require("./lib/websearch");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.4";
+const RELEASE_VERSION = "1.5";
 const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
@@ -28,6 +29,8 @@ const DEEPSEEK_API_KEY = defineSecret("DEEPSEEK_API_KEY");
 const OLLAMA_ACCESS_CLIENT_ID = defineSecret("OLLAMA_ACCESS_CLIENT_ID");
 const OLLAMA_ACCESS_CLIENT_SECRET = defineSecret("OLLAMA_ACCESS_CLIENT_SECRET");
 const ASHNA_API_KEY = defineSecret("ASHNA_API_KEY");
+// Gemini key from the accaza-ai project itself, used for Google Search grounding.
+const WEB_SEARCH_KEY = defineSecret("WEB_SEARCH_KEY");
 const AI_SECRETS = [GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY];
 const KEYS = {
   gemini: () => GEMINI_API_KEY.value(), groq: () => GROQ_API_KEY.value(), cerebras: () => CEREBRAS_API_KEY.value(), deepseek: () => DEEPSEEK_API_KEY.value(),
@@ -106,7 +109,7 @@ exports.skills = onCall({enforceAppCheck: true, timeoutSeconds: 300, memory: "1G
 // One chat turn. Streams the reply (chunks {delta} and, when a provider fails mid-reply and the
 // next one takes over, {reset}) and returns the finished answer. Registered users' turns are
 // saved to their chats; guests send their own short history from the browser tab.
-exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256MiB", secrets: AI_SECRETS}, async (request, response) => {
+exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256MiB", secrets: [...AI_SECRETS, WEB_SEARCH_KEY]}, async (request, response) => {
   const db = getFirestore(), account = await Access.resolveAccount(db, request.auth), data = request.data || {};
   const mode = ["regenerate", "edit"].includes(data.mode) ? data.mode : "new", saves = account.tier !== "guest";
   let question = AI.cleanMultiline(data.question, QUESTION_CHARS), chat = null, plan;
@@ -138,8 +141,18 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256M
   const skills = saves ? await Skills.visibleSkills(db, account) : [];
   const pinned = saves && data.skillId ? skills.find(s => s.id === String(data.skillId)) || null : null;
   const geminiKey = AI.headerValue(GEMINI_API_KEY.value());
-  const tools = combineTools([skills.length ? Skills.skillTools(db, geminiKey, skills) : null]);
-  const system = [saves ? Memory.personalBlock(settings, memories) : "", Skills.catalogBlock(skills, pinned)].filter(Boolean).join("\n\n");
+  // Web search + page reading for everyone (daily caps inside), with sources collected for the answer.
+  const sources = [];
+  const addSources = list => {
+    const fresh = (list || []).filter(src => src && src.url && !sources.some(have => have.url === src.url));
+    if (!fresh.length) return;
+    sources.push(...fresh.slice(0, 12 - sources.length));
+    response.sendChunk({sources}).catch(() => {});
+  };
+  const web = Web.webTools({db, uid: account.uid, day, unlimited: Access.unlimited(account.tier), keys: {search: AI.headerValue(WEB_SEARCH_KEY.value()), chat: geminiKey}, onSources: addSources, now});
+  const tools = combineTools([skills.length ? Skills.skillTools(db, geminiKey, skills) : null, web]);
+  const today = `Today's date in Manila is ${Access.manilaDay(now)}.`;
+  const system = [today, Web.GUIDE, saves ? Memory.personalBlock(settings, memories) : "", Skills.catalogBlock(skills, pinned)].filter(Boolean).join("\n\n");
   const toolsUsed = [];
   let result;
   try {
@@ -158,6 +171,7 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256M
     if (limited) await Access.releaseMessage(db, account.uid, day);
     throw error;
   }
+  result.sources = sources;
   const saved = saves ? await Chats.saveTurn(db, account.uid, chat, plan, result, now) : null;
   // Learn from this exchange (never blocks or fails the answer).
   let memory = null;
@@ -167,7 +181,7 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256M
   }
   // The analytics log keeps who asked, which AI answered and a hash of the question, never the text.
   await db.collection("chatLog").add({at: now, day, uid: account.uid, tier: account.tier, mode, files: files.length, provider: result.provider, model: result.model, backupsTried: result.failures.length, questionHash: crypto.createHash("sha256").update(question).digest("hex"), used: allowance ? allowance.used : null});
-  return {answer: result.answer, provider: result.provider, model: result.model, tier: account.tier, allowance, attachments: files.map(Files.publicFile), memory, tools: toolsUsed.slice(0, 12), skill: pinned ? {id: pinned.id, name: pinned.name} : null, chatId: saved && saved.chatId, title: saved && saved.title, userMessageId: saved && saved.userMessageId, modelMessageId: saved && saved.modelMessageId, releaseVersion: RELEASE_VERSION};
+  return {answer: result.answer, provider: result.provider, model: result.model, tier: account.tier, allowance, attachments: files.map(Files.publicFile), memory, sources, tools: toolsUsed.slice(0, 12), skill: pinned ? {id: pinned.id, name: pinned.name} : null, chatId: saved && saved.chatId, title: saved && saved.title, userMessageId: saved && saved.userMessageId, modelMessageId: saved && saved.modelMessageId, releaseVersion: RELEASE_VERSION};
 });
 
 // Account actions. "me" registers the caller on first use and reports their tier and today's
