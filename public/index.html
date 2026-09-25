@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'"/>
-<meta name="accaza-ai-build" content="2"/>
+<meta name="accaza-ai-build" content="3"/>
 <meta name="description" content="Accaza AI — a general-chat AI assistant."/>
 <meta name="theme-color" content="#19241b"/>
 <title>Accaza AI</title>
@@ -425,16 +425,23 @@ async function send(mode){
   const ai={role:'model',text:'',pending:true};turns.push(ai);renderTurns();
   ai.bubble.classList.add('pending','cursor');ai.bubble.textContent='Thinking…';
   setBusy(true);controller=new AbortController();
-  let text='',frame=0,slow=setTimeout(()=>{if(!text)ai.bubble.textContent='Still thinking… a backup AI is answering. This can take up to two minutes.';},20000);
-  const draw=()=>{frame=0;ai.bubble.classList.remove('pending');paint(ai.bubble,text,true);toBottom(false);};
+  let text='',shown=0,frame=0,slow=setTimeout(()=>{if(!text)ai.bubble.textContent='Still thinking… a backup AI is answering. This can take up to two minutes.';},20000);
+  // AI services send text in bursts; reveal it smoothly so replies "type out" like ChatGPT.
+  const draw=()=>{
+    frame=0;if(shown>text.length)shown=0;
+    if(shown<text.length){shown+=Math.max(2,Math.ceil((text.length-shown)/12));ai.bubble.classList.remove('pending');paint(ai.bubble,text.slice(0,shown),true);toBottom(false);}
+    if(shown<text.length)frame=requestAnimationFrame(draw);
+  };
   const payload=saves()?{question,mode,chatId:current&&current.id}:{question,history,mode:'new'};
   try{
     const {stream,data}=await chatCall.stream(payload,{signal:controller.signal});
     for await(const chunk of stream){
-      if(chunk&&chunk.reset)text='';else if(chunk&&chunk.delta)text+=chunk.delta;
+      if(chunk&&chunk.reset){text='';shown=0;}else if(chunk&&chunk.delta)text+=chunk.delta;
       if(!frame)frame=requestAnimationFrame(draw);
     }
     const result=await data;
+    // Let the typing animation finish (at most about a second) before the final render.
+    for(let i=0;i<60&&shown<text.length;i++)await new Promise(r=>setTimeout(r,16));
     text=result.answer||text;ai.pending=false;ai.text=text;paint(ai.bubble,text,false);ai.bubble.classList.remove('pending');
     if(result.tier)ME.tier=result.tier;setAllowance(result.allowance?result.allowance.remaining:null);
     if(result.chatId){
