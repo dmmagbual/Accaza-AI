@@ -325,3 +325,54 @@ test("tool sets combine; unknown tools answer with an error instead of throwing"
   assert.deepEqual(await t.run("zzz", {}), {error: "Unknown tool zzz."});
   assert.equal(combineTools([null]), null);
 });
+
+// ---------- Web search ----------
+const Net = require("../functions/lib/netguard");
+const Web = require("../functions/lib/websearch");
+test("SSRF guard blocks private, loopback, metadata and credentialed URLs", async () => {
+  for (const ip of ["10.0.0.1", "127.0.0.1", "169.254.169.254", "192.168.1.5", "172.20.0.1", "100.64.1.1", "::1", "fd00::1", "::ffff:127.0.0.1"]) assert.equal(Net.isPrivateIp(ip), true, ip);
+  assert.equal(Net.isPrivateIp("8.8.8.8"), false);
+  const pub = async () => [{address: "93.184.216.34"}], priv = async () => [{address: "10.1.2.3"}];
+  assert.equal((await Net.assertPublicUrl("https://example.com/x", pub)).hostname, "example.com");
+  await assert.rejects(Net.assertPublicUrl("https://evil.example/", priv), /not allowed/);
+  await assert.rejects(Net.assertPublicUrl("http://metadata.google.internal/", pub), /not allowed/);
+  await assert.rejects(Net.assertPublicUrl("ftp://example.com/", pub), /Only http/);
+  await assert.rejects(Net.assertPublicUrl("https://u:p@example.com/", pub), /passwords/);
+});
+test("HTML is reduced to readable text", () => {
+  const out = Net.htmlToText("<html><head><title>Menu</title><style>x{}</style></head><body><nav>Home</nav><h1>Latte</h1><p>PHP&nbsp;150</p><script>bad()</script></body></html>");
+  assert.equal(out.title, "Menu"); assert.match(out.text, /Latte\s+PHP 150/); assert.doesNotMatch(out.text, /bad\(\)|Home/);
+});
+function webDb() {
+  const store = {};
+  return {store, collection: () => ({doc: id => ({id})}), runTransaction: async fn => fn({get: async ref => ({exists: Boolean(store[ref.id]), data: () => store[ref.id]}), set: (ref, v) => { store[ref.id] = v; }})};
+}
+test("web_search uses Google grounding, then the other key, then Wikipedia; sources are collected", async () => {
+  const calls = [], got = [];
+  const fetchImpl = async (url, init) => {
+    calls.push(String(url).includes("wikipedia") ? "wiki" : init.headers["x-goog-api-key"]);
+    if (String(url).includes("wikipedia")) return {ok: true, json: async () => ({query: {search: [{title: "Node.js", snippet: "JavaScript <b>runtime</b>"}]}})};
+    return {ok: false, status: 402, json: async () => ({})};
+  };
+  const tools = Web.webTools({db: webDb(), uid: "u", day: "d", unlimited: false, keys: {search: "S", chat: "C"}, onSources: s => got.push(...s), fetchImpl});
+  const out = await tools.run("web_search", {query: "latest node"});
+  assert.deepEqual(calls, ["S", "C", "wiki"]);
+  assert.equal(out.engine, "wikipedia"); assert.match(out.summary, /JavaScript runtime/);
+  assert.equal(got[0].url, "https://en.wikipedia.org/wiki/Node.js");
+});
+test("grounded results return the summary and deduplicated sources", async () => {
+  const fetchImpl = async () => ({ok: true, json: async () => ({candidates: [{content: {parts: [{text: "Node 26 is current."}]}, groundingMetadata: {groundingChunks: [{web: {uri: "https://a.example/x", title: "nodejs.org"}}, {web: {uri: "https://a.example/x", title: "nodejs.org"}}]}}]})});
+  const out = await Web.geminiGrounded("k", "node", fetchImpl);
+  assert.equal(out.summary, "Node 26 is current."); assert.equal(out.sources.length, 1);
+});
+test("web search respects the daily cap", async () => {
+  const db = webDb();
+  db.store.d = {total: 0, users: {u: 5}};
+  const tools = Web.webTools({db, uid: "u", day: "d", unlimited: false, keys: {}, fetchImpl: async () => { throw new Error("should not search"); }});
+  assert.match((await tools.run("web_search", {query: "x"})).error, /daily web search limit/);
+});
+test("open_url refuses private addresses and non-page files", async () => {
+  const tools = Web.webTools({db: webDb(), uid: "u", day: "d", unlimited: true, keys: {}, safeFetchImpl: async url => { if (/10\.0/.test(url)) throw new Error("That address is not allowed."); return {status: 200, url, contentType: "application/zip", text: ""}; }});
+  assert.match((await tools.run("open_url", {url: "http://10.0.0.1/"})).error, /not allowed/);
+  assert.match((await tools.run("open_url", {url: "https://x.example/a.zip"})).error, /not a web page/);
+});

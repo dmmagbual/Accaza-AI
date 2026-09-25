@@ -27,6 +27,11 @@ Live at **https://accaza-ai.web.app**.
   - Files are read once (PDFs through Gemini), chunked and embedded with `gemini-embedding-001` (768-d), and searched with Firestore vector search.
   - In chat, the AI sees the skill catalogue and calls `read_skill` / `search_skill` tools. Typing **/** pins a skill for the message.
   - The owner can share a skill with everyone. Members can create up to 5 skills; staff 50.
+- **Web search and links** (everyone):
+  - The AI calls `web_search` for anything current. It uses Gemini Google Search grounding with the `WEB_SEARCH_KEY` secret (a key from the accaza-ai project), then the chat key, then Wikipedia's free API as a last resort.
+  - `open_url` reads a link. It's SSRF-guarded: no private addresses, and every redirect is re-checked.
+  - Sources show under the answer and are saved with the chat.
+  - Daily caps: 5 searches per member/guest, 60 per owner/staff, 150 in total, to stay inside the 5,000-a-month free allowance.
 - **Saved chats** in a sidebar for registered users (owner, staff, members), with rename, delete and delete all. Guests' chats stay in their browser tab only.
 - Models:
   - Owner and staff start on **Gemini 3.8 Flash**, then **Flash-Lite**.
@@ -52,6 +57,7 @@ Live at **https://accaza-ai.web.app**.
 - `functions/lib/files.js`: attachment checks, the upload cap, the Gemini Files API, owner-bound resolution.
 - `functions/lib/memory.js`: settings, memories, extraction, sensitive-data filter.
 - `functions/lib/skills.js` and `functions/lib/tools.js`: skill storage, ingestion, retrieval tools, and the tool combiner.
+- `functions/lib/websearch.js` and `functions/lib/netguard.js`: web tools and the safe fetch.
 - `functions/lib/chats.js`: saved chats (create, regenerate, edit, list, rename, delete).
 - `firestore.rules`: browsers get no direct database access. Everything goes through the functions.
 - `tests/server.test.js`: unit tests.
@@ -63,6 +69,7 @@ Live at **https://accaza-ai.web.app**.
 - `users/{uid}/settings/profile` and `users/{uid}/memories/{id}`: personalisation and memory.
 - `skills/{id}` and `skills/{id}/chunks/{id}` (vector index on `embedding`, defined in `firestore.indexes.json`): skills.
 - `uploads/{id}` (TTL `expireAt`) and `uploadUsage/{day}`: attachments and the daily upload cap.
+- `searchUsage/{day}`: web search caps.
 - `usage/{day}`: per-person and total message counts for members and guests (Manila day).
 - `chatLog/{id}`: analytics (who asked, which AI answered, and a SHA-256 hash of the question). The question text is not stored here.
 - `providerHealth/{day}`: backup answers and provider failures.
@@ -70,7 +77,7 @@ Live at **https://accaza-ai.web.app**.
 
 ## AI keys
 
-The keys are stored as Secret Manager secrets in `accaza-ai`: GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY. They never go in this repository. To change one:
+The keys are stored as Secret Manager secrets in `accaza-ai`: GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY, WEB_SEARCH_KEY. They never go in this repository. To change one:
 
 ```powershell
 firebase functions:secrets:set GEMINI_API_KEY --project accaza-ai
