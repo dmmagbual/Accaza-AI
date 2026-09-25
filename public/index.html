@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'"/>
-<meta name="accaza-ai-build" content="7"/>
+<meta name="accaza-ai-build" content="8"/>
 <meta name="description" content="Accaza AI — a general-chat AI assistant."/>
 <meta name="theme-color" content="#19241b"/>
 <title>Accaza AI</title>
@@ -166,6 +166,27 @@
   .memRow span{flex:1;min-width:0;overflow-wrap:anywhere;} .memRow button{background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:.85rem;}
   .memAdd{display:flex;gap:.4rem;margin-bottom:.8rem;} .memAdd input{flex:1;}
   .memNote{display:inline-block;margin-top:.35rem;font-size:.72rem;color:var(--accent-ink);background:var(--accent-soft);border-radius:99px;padding:.15rem .55rem;cursor:pointer;border:0;}
+  /* Skills */
+  #skillsWrap{display:none;flex:1;min-height:0;overflow:auto;padding:1rem;}
+  #skillsInner{max-width:760px;margin:0 auto;}
+  #skillsWrap h2{font-family:'Playfair Display',serif;font-size:1.25rem;margin:0 0 .3rem;color:var(--accent-ink);}
+  .skillBar{display:flex;gap:.5rem;flex-wrap:wrap;margin:.6rem 0 1rem;}
+  .skillCard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:.8rem .9rem;margin-bottom:.6rem;}
+  .skillCard b{font-size:.92rem;} .skillCard p{margin:.3rem 0 .5rem;font-size:.8rem;color:var(--muted);line-height:1.45;}
+  .skillCard .row{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;}
+  .skillCard .row small{color:var(--muted);font-size:.72rem;margin-right:auto;}
+  .btn.small{padding:.35rem .6rem;font-size:.76rem;} .btn.light{background:transparent;color:var(--accent-ink);border:1px solid var(--accent);}
+  .fileRow{display:flex;align-items:center;gap:.5rem;font-size:.8rem;padding:.35rem .5rem;border:1px solid var(--line);border-radius:8px;margin-bottom:.3rem;background:var(--panel);}
+  .fileRow span{flex:1;min-width:0;overflow-wrap:anywhere;} .fileRow small{color:var(--muted);}
+  .fileRow button{background:transparent;border:0;color:var(--muted);cursor:pointer;}
+  #skillMenu{display:none;max-width:760px;margin:0 auto .4rem;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);max-height:220px;overflow:auto;}
+  #skillMenu button{display:block;width:100%;text-align:left;background:transparent;border:0;padding:.5rem .7rem;cursor:pointer;color:var(--ink);font-size:.84rem;}
+  #skillMenu button small{display:block;color:var(--muted);font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  #skillMenu button.on,#skillMenu button:hover{background:var(--side-hover);}
+  .skillChip{display:inline-flex;align-items:center;gap:.35rem;background:var(--accent-soft);color:var(--accent-ink);border-radius:99px;padding:.2rem .3rem .2rem .6rem;font-size:.76rem;font-weight:600;}
+  .skillChip button{background:transparent;border:0;color:inherit;cursor:pointer;}
+  .toolLine{font-size:.74rem;color:var(--muted);margin:.1rem 0 .3rem;}
+  .toolLine.live::before{content:'⚙ ';}
   /* Owner: staff panel */
   #staffWrap{display:none;flex:1;min-height:0;overflow:auto;padding:1rem;}
   #staffInner{max-width:760px;margin:0 auto;}
@@ -209,6 +230,7 @@
     <div id="sideFoot">
       <div class="who" id="whoLine"></div>
       <div class="row">
+        <button id="skillsBtn" type="button" style="display:none">Skills</button>
         <button id="settingsBtn" type="button" style="display:none">Settings</button>
         <button id="themeBtn" type="button">Theme: auto</button>
         <button id="deleteAllBtn" type="button" style="display:none">Delete all chats</button>
@@ -291,6 +313,7 @@
     </div>
     <div id="composer">
       <div id="editBar">Editing your last question.<a id="cancelEdit">Cancel</a></div>
+      <div id="skillMenu"></div>
       <div id="chips"></div>
       <form id="askForm">
         <button id="attachBtn" type="button" title="Attach photos or PDFs (up to 3, 7 MB each)" aria-label="Attach files">📎</button>
@@ -302,6 +325,31 @@
     </div>
   </div>
 
+  <div id="skillsWrap">
+    <div id="skillsInner">
+      <div id="skillListView">
+        <h2>Skills</h2>
+        <div class="sideNote" style="padding:0">Skills are instructions plus reference files (SOPs, recipes, price lists) that Accaza AI uses when a question matches. Type <b>/</b> in the message box to use one directly. Claude-style skill .zip files and SKILL.md work too.</div>
+        <div class="skillBar"><button class="btn" type="button" id="newSkillBtn">＋ New skill</button><button class="btn light" type="button" id="importSkillBtn">Import .zip / SKILL.md</button><input type="file" id="importSkillInput" accept=".zip,.md" hidden/></div>
+        <div class="err" id="skillsErr"></div><div class="info" id="skillsInfo"></div>
+        <div id="skillList"></div>
+      </div>
+      <div id="skillEditView" style="display:none">
+        <h2 id="skillEditTitle">New skill</h2>
+        <div class="field"><label for="skillName">Name</label><input type="text" id="skillName" maxlength="60" placeholder="e.g. Barista SOP"/></div>
+        <div class="field"><label for="skillDesc">When should it be used?</label><small>One or two sentences. Accaza AI reads this to decide when the skill applies.</small><input type="text" id="skillDesc" maxlength="400" placeholder="e.g. Espresso dial-in, bar opening and closing steps"/></div>
+        <div class="field"><label for="skillInstr">Instructions</label><small>What Accaza AI should do or follow when using this skill (Markdown is fine).</small><textarea id="skillInstr" rows="10" maxlength="20000"></textarea></div>
+        <label class="toggle" id="skillShareRow" style="display:none"><input type="checkbox" id="skillShared"/><span>Share with everyone<small>All signed-in users can use this skill (only you can edit it).</small></span></label>
+        <div class="skillBar"><button class="btn" type="button" id="saveSkillBtn">Save</button><button class="btn light" type="button" id="backSkillsBtn">Back</button><button class="btn ghost" type="button" id="deleteSkillBtn" style="display:none">Delete skill</button><span class="saved" id="skillSaved"></span></div>
+        <div id="skillFilesBox" style="display:none">
+          <div class="field"><label>Reference files</label><small>.md, .txt, .csv, .json, .pdf, or a skill .zip (up to 7 MB each). They are read once and searched when needed.</small></div>
+          <div id="skillFiles"></div>
+          <button class="btn light small" type="button" id="addSkillFilesBtn">＋ Add files</button><input type="file" id="skillFileInput" multiple accept=".md,.markdown,.txt,.csv,.json,.pdf,.zip,.html,.xml,.yaml,.yml" hidden/>
+          <div class="err" id="skillFileErr"></div><div class="info" id="skillFileInfo"></div>
+        </div>
+      </div>
+    </div>
+  </div>
   <div id="settingsWrap">
     <div id="settingsInner">
       <h2>Settings</h2>
@@ -342,6 +390,7 @@ const app=initializeApp(firebaseConfig);
 const APP_CHECK_SITE_KEY='6LfQgM4tAAAAAPDk6bKu9PMGEmGDgwUUCfNLo1pN';
 try{initializeAppCheck(app,{provider:new ReCaptchaEnterpriseProvider(APP_CHECK_SITE_KEY),isTokenAutoRefreshEnabled:true});}catch(e){console.warn('App Check init failed',e);}
 const auth=getAuth(app),functions=getFunctions(app,'asia-southeast1');
+const skillsCall=httpsCallable(functions,'skills',{timeout:310000});
 const chatCall=httpsCallable(functions,'chat',{timeout:130000}),accountCall=httpsCallable(functions,'account',{timeout:60000}),uploadCall=httpsCallable(functions,'upload',{timeout:100000});
 try{await setPersistence(auth,browserLocalPersistence);}catch(_e){}
 
@@ -375,10 +424,10 @@ async function copyText(text,button){
 }
 
 // ---------- Views ----------
-const VIEWS=['loginWrap','registerWrap','resetWrap','verifyWrap','chatWrap','staffWrap','settingsWrap'];
+const VIEWS=['loginWrap','registerWrap','resetWrap','verifyWrap','chatWrap','staffWrap','settingsWrap','skillsWrap'];
 function show(view){
-  VIEWS.forEach(v=>{by(v).style.display=v===view?(v==='staffWrap'||v==='settingsWrap'?'block':'flex'):'none';});
-  const inApp=view==='chatWrap'||view==='staffWrap'||view==='settingsWrap';
+  VIEWS.forEach(v=>{by(v).style.display=v===view?(v==='staffWrap'||v==='settingsWrap'||v==='skillsWrap'?'block':'flex'):'none';});
+  const inApp=view==='chatWrap'||view==='staffWrap'||view==='settingsWrap'||view==='skillsWrap';
   by('topbarActions').style.display=inApp?'flex':'none';by('sidebar').style.display=inApp?'flex':'none';by('menuBtn').style.visibility=inApp?'visible':'hidden';
   closeSide();
 }
@@ -437,6 +486,7 @@ function turnEl(turn){
     });
     wrap.appendChild(files);
   }
+  if(turn.role==='model'&&turn.tools&&turn.tools.length){const tl=document.createElement('div');tl.className='toolLine';tl.textContent='Used: '+turn.tools.map(t=>t.label).join(' · ');wrap.appendChild(tl);}
   if(turn.role==='user'){bubble.textContent=turn.text;if(!turn.text)bubble.style.display='none';}else if(turn.error){bubble.classList.add('error');bubble.textContent=turn.text;}else paint(bubble,turn.text,false);
   wrap.append(bubble,actions);turn.el=wrap;turn.bubble=bubble;turn.actions=actions;return wrap;
 }
@@ -511,9 +561,17 @@ async function send(mode){
   };
   const payload=saves()?{question,mode,chatId:current&&current.id}:{question,history,mode:'new'};
   if(sendIds&&sendIds.length)payload.attachments=sendIds;
+  if(pinnedSkill&&saves())payload.skillId=pinnedSkill.id;
+  let toolLine=null;
+  const showTool=t=>{
+    if(!toolLine){toolLine=document.createElement('div');toolLine.className='toolLine live';ai.el.insertBefore(toolLine,ai.bubble);}
+    toolLine.textContent=t.label+(t.status==='running'?'…':t.status==='failed'?' (failed)':' ✓');
+    if(!text)ai.bubble.textContent=t.status==='running'?'Working…':'Thinking…';
+  };
   try{
     const {stream,data}=await chatCall.stream(payload,{signal:controller.signal});
     for await(const chunk of stream){
+      if(chunk&&chunk.tool){showTool(chunk.tool);continue;}
       if(chunk&&chunk.reset){text='';shown=0;}else if(chunk&&chunk.delta)text+=chunk.delta;
       if(!frame)frame=setTimeout(draw,16);
     }
@@ -522,6 +580,8 @@ async function send(mode){
     for(let i=0;i<60&&shown<text.length;i++)await new Promise(r=>setTimeout(r,16));
     text=result.answer||text;ai.pending=false;ai.text=text;paint(ai.bubble,text,false);ai.bubble.classList.remove('pending');
     if(result.tier)ME.tier=result.tier;setAllowance(result.allowance?result.allowance.remaining:null);
+    if(toolLine){toolLine.remove();toolLine=null;}
+    if(result.tools&&result.tools.length){ai.tools=result.tools;const tl=document.createElement('div');tl.className='toolLine';tl.textContent='Used: '+result.tools.map(t=>t.label).join(' · ');ai.el.insertBefore(tl,ai.bubble);}
     const mem=result.memory;
     if(mem&&(mem.added.length||mem.updated.length||mem.removed.length)){ai.memory=[...mem.added.map(m=>'Saved: '+m.text),...mem.updated.map(m=>'Updated: '+m.text),...(mem.removed.length?[mem.removed.length+' removed']:[])].join('\n');}
     if(result.chatId){
@@ -545,7 +605,7 @@ async function send(mode){
 }
 
 function newChat(){
-  if(busy)return;current=null;turns=[];cancelEdit();clearChips();try{sessionStorage.removeItem(LAST_CHAT);sessionStorage.removeItem(GUEST_TURNS);}catch(e){}
+  if(busy)return;current=null;turns=[];cancelEdit();pinnedSkill=null;clearChips();try{sessionStorage.removeItem(LAST_CHAT);sessionStorage.removeItem(GUEST_TURNS);}catch(e){}
   renderTurns();renderChatList();show('chatWrap');q.focus();
 }
 by('newChatBtn').addEventListener('click',newChat);
@@ -607,6 +667,113 @@ async function loadChats(){
   if(last&&chats.some(c=>c.id===last))openChat(last,true);
 }
 
+// ---------- Skills ----------
+let mySkills=[],canShare=false,editingSkill=null,pinnedSkill=null;
+async function loadSkills(){
+  try{const d=(await skillsCall({action:'list'})).data||{};mySkills=d.skills||[];canShare=d.canShare===true;}catch(e){mySkills=[];}
+  return mySkills;
+}
+function openSkills(){show('skillsWrap');by('skillEditView').style.display='none';by('skillListView').style.display='block';showMsg('skillsErr','');showMsg('skillsInfo','');renderSkillList();}
+async function renderSkillList(){
+  const box=by('skillList');box.textContent='Loading…';await loadSkills();box.replaceChildren();
+  if(!mySkills.length){const n=document.createElement('div');n.className='sideNote';n.style.padding='0';n.textContent='No skills yet. Create one, or import a skill .zip.';box.appendChild(n);return;}
+  mySkills.forEach(sk=>{
+    const card=document.createElement('div'),title=document.createElement('b'),p=document.createElement('p'),row=document.createElement('div'),meta=document.createElement('small');
+    card.className='skillCard';title.textContent=sk.name;p.textContent=sk.description;row.className='row';
+    meta.textContent=[sk.shared?'Shared with everyone':'Private',sk.mine?'':'by '+(sk.ownerName||'owner'),sk.files.length?sk.files.length+' file'+(sk.files.length>1?'s':''):''].filter(Boolean).join(' · ');
+    const use=document.createElement('button');use.className='btn small';use.type='button';use.textContent='Use in chat';use.addEventListener('click',()=>{pinnedSkill={id:sk.id,name:sk.name};renderChips();show('chatWrap');q.focus();});
+    row.append(meta,use);
+    if(sk.mine){const ed=document.createElement('button');ed.className='btn light small';ed.type='button';ed.textContent='Edit';ed.addEventListener('click',()=>editSkill(sk.id));row.appendChild(ed);}
+    card.append(title,p,row);box.appendChild(card);
+  });
+}
+async function editSkill(id){
+  by('skillListView').style.display='none';by('skillEditView').style.display='block';by('skillSaved').textContent='';showMsg('skillFileErr','');showMsg('skillFileInfo','');
+  by('skillShareRow').style.display=canShare?'flex':'none';
+  if(!id){editingSkill=null;by('skillEditTitle').textContent='New skill';by('skillName').value='';by('skillDesc').value='';by('skillInstr').value='';by('skillShared').checked=false;by('skillFilesBox').style.display='none';by('deleteSkillBtn').style.display='none';return;}
+  try{
+    const sk=(await skillsCall({action:'get',skillId:id})).data;editingSkill=sk;
+    by('skillEditTitle').textContent='Edit skill';by('skillName').value=sk.name;by('skillDesc').value=sk.description;by('skillInstr').value=sk.instructions||'';by('skillShared').checked=sk.shared;
+    by('skillFilesBox').style.display='block';by('deleteSkillBtn').style.display='inline-block';renderSkillFiles(sk.files||[]);
+  }catch(e){showMsg('skillsErr',cleanErr(e,'Could not open the skill.'));openSkills();}
+}
+function renderSkillFiles(files){
+  const box=by('skillFiles');box.replaceChildren();
+  files.forEach(f=>{
+    const row=document.createElement('div'),name=document.createElement('span'),meta=document.createElement('small'),del=document.createElement('button');
+    row.className='fileRow';name.textContent='📄 '+f.name;meta.textContent=(f.chars||0).toLocaleString()+' chars';del.type='button';del.textContent='✕';del.title='Remove';
+    del.addEventListener('click',async()=>{del.disabled=true;try{await skillsCall({action:'deleteFile',skillId:editingSkill.id,file:f.name});row.remove();}catch(e){del.disabled=false;showMsg('skillFileErr',cleanErr(e,'Could not remove.'));}});
+    row.append(name,meta,del);box.appendChild(row);
+  });
+}
+async function uploadSkillFiles(list,skillId,infoId,errId){
+  showMsg(errId,'');let done=0;
+  for(const file of Array.from(list||[])){
+    showMsg(infoId,'Reading '+file.name+'… (large PDFs can take a minute)');
+    try{
+      if(file.size>7*1024*1024)throw new Error(file.name+' is larger than 7 MB.');
+      const res=(await skillsCall({action:'upload',skillId,name:file.name,base64:await toBase64(file)})).data||{};
+      done+=1;showMsg(infoId,[file.name+' added.',...(res.notes||[])].join(' '));
+    }catch(e){showMsg(errId,cleanErr(e,'Could not add '+file.name+'.'));}
+  }
+  return done;
+}
+by('skillsBtn').addEventListener('click',()=>{if(by('skillsWrap').style.display==='block')show('chatWrap');else openSkills();});
+by('newSkillBtn').addEventListener('click',()=>editSkill(null));
+by('backSkillsBtn').addEventListener('click',openSkills);
+by('saveSkillBtn').addEventListener('click',async()=>{
+  const b=by('saveSkillBtn');b.disabled=true;by('skillSaved').textContent='';
+  try{
+    const res=(await skillsCall({action:'save',skillId:editingSkill&&editingSkill.id,name:by('skillName').value,description:by('skillDesc').value,instructions:by('skillInstr').value,shared:by('skillShared').checked})).data;
+    by('skillSaved').textContent='Saved ✓';if(!editingSkill)await editSkill(res.id);
+  }catch(e){by('skillSaved').textContent=cleanErr(e,'Could not save.');}
+  b.disabled=false;
+});
+by('addSkillFilesBtn').addEventListener('click',()=>by('skillFileInput').click());
+by('skillFileInput').addEventListener('change',async ev=>{const files=ev.target.files;ev.target.value='';if(!editingSkill)return;await uploadSkillFiles(files,editingSkill.id,'skillFileInfo','skillFileErr');editSkill(editingSkill.id);});
+by('importSkillBtn').addEventListener('click',()=>by('importSkillInput').click());
+by('importSkillInput').addEventListener('change',async ev=>{
+  const file=ev.target.files[0];ev.target.value='';if(!file)return;showMsg('skillsErr','');
+  try{
+    const base=file.name.replace(/\.(zip|md)$/i,'').replace(/[-_]+/g,' ').trim().slice(0,60)||'Imported skill';
+    const res=(await skillsCall({action:'save',name:base,description:'Imported from '+file.name})).data;
+    const ok=await uploadSkillFiles([file],res.id,'skillsInfo','skillsErr');
+    if(!ok)await skillsCall({action:'delete',skillId:res.id}).catch(()=>{});
+    renderSkillList();
+  }catch(e){showMsg('skillsErr',cleanErr(e,'Could not import that skill.'));}
+});
+let armedSkill=0;
+by('deleteSkillBtn').addEventListener('click',async()=>{
+  const b=by('deleteSkillBtn');
+  if(!armedSkill){armedSkill=setTimeout(()=>{armedSkill=0;b.textContent='Delete skill';},3000);b.textContent='Tap again to delete';return;}
+  clearTimeout(armedSkill);armedSkill=0;b.disabled=true;
+  try{await skillsCall({action:'delete',skillId:editingSkill.id});if(pinnedSkill&&pinnedSkill.id===editingSkill.id){pinnedSkill=null;renderChips();}openSkills();}catch(e){showMsg('skillFileErr',cleanErr(e,'Could not delete.'));}
+  b.disabled=false;b.textContent='Delete skill';
+});
+// "/" at the start of the message box opens the skill picker.
+let menuIndex=0,menuItems=[];
+function closeSkillMenu(){by('skillMenu').style.display='none';menuItems=[];}
+function pickSkill(sk){pinnedSkill={id:sk.id,name:sk.name};q.value=q.value.replace(/^\/\S*\s?/,'');closeSkillMenu();renderChips();q.focus();}
+async function updateSkillMenu(){
+  const m=q.value.match(/^\/(\S*)$/);
+  if(!m||!saves()){closeSkillMenu();return;}
+  if(!mySkills.length)await loadSkills();
+  const term=m[1].toLowerCase();menuItems=mySkills.filter(sk=>sk.name.toLowerCase().includes(term)).slice(0,8);
+  const box=by('skillMenu');box.replaceChildren();
+  if(!menuItems.length){const b=document.createElement('button');b.type='button';b.textContent=mySkills.length?'No matching skill':'No skills yet — open Skills to create one';b.addEventListener('click',()=>{closeSkillMenu();if(!mySkills.length)openSkills();});box.appendChild(b);box.style.display='block';return;}
+  menuIndex=Math.min(menuIndex,menuItems.length-1);
+  menuItems.forEach((sk,i)=>{const b=document.createElement('button'),small=document.createElement('small');b.type='button';b.className=i===menuIndex?'on':'';b.textContent='✦ '+sk.name;small.textContent=sk.description;b.appendChild(small);b.addEventListener('mousedown',ev=>{ev.preventDefault();pickSkill(sk);});box.appendChild(b);});
+  box.style.display='block';
+}
+q.addEventListener('input',()=>{menuIndex=0;updateSkillMenu();});
+q.addEventListener('keydown',ev=>{
+  if(by('skillMenu').style.display!=='block'||!menuItems.length)return;
+  if(ev.key==='ArrowDown'){ev.preventDefault();menuIndex=(menuIndex+1)%menuItems.length;updateSkillMenu();}
+  else if(ev.key==='ArrowUp'){ev.preventDefault();menuIndex=(menuIndex-1+menuItems.length)%menuItems.length;updateSkillMenu();}
+  else if(ev.key==='Enter'||ev.key==='Tab'){ev.preventDefault();ev.stopImmediatePropagation();pickSkill(menuItems[menuIndex]);}
+  else if(ev.key==='Escape'){closeSkillMenu();}
+},true);
+
 // ---------- Settings: personalise + memory ----------
 function openSettings(tab){show('settingsWrap');selectTab(tab||'personal');loadSettings();}
 function selectTab(tab){const mem=tab==='memory';by('tabPersonal').classList.toggle('on',!mem);by('tabMemory').classList.toggle('on',mem);by('panePersonal').style.display=mem?'none':'block';by('paneMemory').style.display=mem?'block':'none';}
@@ -659,7 +826,8 @@ let pending=[],chipSeq=0;
 function chipToFile(p){return {id:p.id,displayName:p.name,mimeType:p.mimeType,expiresAt:p.expiresAt,previewUrl:p.previewUrl};}
 function fmtSize(n){return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB';}
 function renderChips(){
-  const box=by('chips');box.replaceChildren();box.style.display=pending.length?'flex':'none';
+  const box=by('chips');box.replaceChildren();box.style.display=pending.length||pinnedSkill?'flex':'none';
+  if(pinnedSkill){const c=document.createElement('span'),x=document.createElement('button');c.className='skillChip';c.textContent='✦ '+pinnedSkill.name;x.type='button';x.textContent='✕';x.title='Stop using this skill';x.addEventListener('click',()=>{pinnedSkill=null;renderChips();});c.appendChild(x);box.appendChild(c);}
   pending.forEach(p=>{
     const chip=document.createElement('div'),meta=document.createElement('div'),name=document.createElement('b'),state=document.createElement('small'),x=document.createElement('button');
     chip.className='chip'+(p.status==='error'?' error':'');
@@ -824,7 +992,7 @@ async function render(user){
   }
   const changed=user.uid!==lastUid;lastUid=user.uid;
   by('signOutBtn').textContent=user.isAnonymous?'Exit guest':'Sign out';
-  by('staffBtn').style.display='none';by('staffBtn').textContent='Staff';by('settingsBtn').style.display='none';
+  by('staffBtn').style.display='none';by('staffBtn').textContent='Staff';by('settingsBtn').style.display='none';by('skillsBtn').style.display='none';
   ME={tier:user.isAnonymous?'guest':'member'};setAllowance(null);
   by('whoLine').textContent=user.isAnonymous?'Guest':(user.displayName||user.email||'');
   if(changed){current=null;chats=[];turns=user.isAnonymous?loadGuestTurns():[];}
@@ -834,7 +1002,7 @@ async function render(user){
     if(me.tier==='unverified'){show('verifyWrap');return;}
     ME=me;setAllowance(me.remaining);
     if(me.tier==='owner')by('staffBtn').style.display='inline-block';
-    by('settingsBtn').style.display=saves()?'inline-block':'none';
+    by('settingsBtn').style.display=saves()?'inline-block':'none';by('skillsBtn').style.display=saves()?'inline-block':'none';mySkills=[];
     by('whoLine').textContent=user.isAnonymous?'Guest':((me.name||user.email||'')+' · '+me.tier);
     if(saves()&&changed)await loadChats();else renderChatList();
   }catch(e){console.warn('account check failed',e);}
