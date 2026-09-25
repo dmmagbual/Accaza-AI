@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'"/>
-<meta name="accaza-ai-build" content="9"/>
+<meta name="accaza-ai-build" content="10"/>
 <meta name="description" content="Accaza AI — a general-chat AI assistant."/>
 <meta name="theme-color" content="#19241b"/>
 <title>Accaza AI</title>
@@ -356,13 +356,32 @@
   <div id="settingsWrap">
     <div id="settingsInner">
       <h2>Settings</h2>
-      <div class="tabs"><button type="button" id="tabPersonal" class="on">Personalise</button><button type="button" id="tabMemory">Memory</button></div>
+      <div class="tabs"><button type="button" id="tabPersonal" class="on">Personalise</button><button type="button" id="tabMemory">Memory</button><button type="button" id="tabConnectors" style="display:none">Connectors</button></div>
       <div id="panePersonal">
         <div class="field"><label for="aboutMe">About you</label><small>What should Accaza AI know about you? For example your work, your business, your goals.</small><textarea id="aboutMe" rows="4" maxlength="1500"></textarea></div>
         <div class="field"><label for="replyStyle">How should Accaza AI reply?</label><small>Tone, length, format. For example "Short answers, bullet points, prices in PHP".</small><textarea id="replyStyle" rows="3" maxlength="1500"></textarea></div>
         <label class="toggle"><input type="checkbox" id="useMemory"/><span>Use memory<small>Let Accaza AI use what it remembers about you in every chat.</small></span></label>
         <label class="toggle"><input type="checkbox" id="learnMemory"/><span>Learn from chats<small>Save useful facts automatically. You can always say "remember that…" or "forget…".</small></span></label>
         <button class="btn" type="button" id="saveSettingsBtn">Save</button><span class="saved" id="settingsSaved"></span>
+      </div>
+      <div id="paneConnectors" style="display:none">
+        <div class="info" id="connInfo"></div><div class="err" id="connErr"></div>
+        <div class="skillCard">
+          <b>Google (Drive, Gmail, Calendar)</b>
+          <p>Read-only: Accaza AI can search and read your Drive files, emails and calendar when you ask. It cannot send, change or delete anything.</p>
+          <div id="googleBox">Loading…</div>
+        </div>
+        <div class="skillCard">
+          <b>MCP connectors</b>
+          <p>Connect any app that offers a remote MCP server (the standard Claude and ChatGPT use), e.g. Notion, GitHub, Linear, Asana. By default only tools the server marks read-only are used.</p>
+          <div id="mcpList"></div>
+          <div class="field"><label for="mcpName">Name</label><input type="text" id="mcpName" maxlength="40" placeholder="e.g. Notion"/></div>
+          <div class="field"><label for="mcpUrl">Server URL (https)</label><input type="text" id="mcpUrl" placeholder="https://…/mcp"/></div>
+          <div class="field"><label for="mcpToken">Access token (optional)</label><small>Stored encrypted. Sent as "Authorization: Bearer …" unless you change the header below.</small><input type="password" id="mcpToken" autocomplete="off"/></div>
+          <div class="field"><label for="mcpHeader">Header name (optional)</label><input type="text" id="mcpHeader" placeholder="Authorization"/></div>
+          <label class="toggle"><input type="checkbox" id="mcpWrites"/><span>Allow actions that change things<small>Lets Accaza AI use tools that create, update or delete. Leave off unless you trust the server.</small></span></label>
+          <button class="btn" type="button" id="mcpAddBtn">Add connector</button>
+        </div>
       </div>
       <div id="paneMemory" style="display:none">
         <div class="memAdd"><input type="text" id="newMemory" maxlength="200" placeholder="Add something to remember, e.g. I prefer prices in PHP"/><button class="btn" type="button" id="addMemoryBtn">Add</button></div>
@@ -788,7 +807,46 @@ q.addEventListener('keydown',ev=>{
 
 // ---------- Settings: personalise + memory ----------
 function openSettings(tab){show('settingsWrap');selectTab(tab||'personal');loadSettings();}
-function selectTab(tab){const mem=tab==='memory';by('tabPersonal').classList.toggle('on',!mem);by('tabMemory').classList.toggle('on',mem);by('panePersonal').style.display=mem?'none':'block';by('paneMemory').style.display=mem?'block':'none';}
+function selectTab(tab){
+  const t=['personal','memory','connectors'].includes(tab)?tab:'personal';
+  by('tabPersonal').classList.toggle('on',t==='personal');by('tabMemory').classList.toggle('on',t==='memory');by('tabConnectors').classList.toggle('on',t==='connectors');
+  by('panePersonal').style.display=t==='personal'?'block':'none';by('paneMemory').style.display=t==='memory'?'block':'none';by('paneConnectors').style.display=t==='connectors'?'block':'none';
+  if(t==='connectors')loadConnectors();
+}
+by('tabConnectors').addEventListener('click',()=>selectTab('connectors'));
+async function loadConnectors(){
+  showMsg('connErr','');
+  try{
+    const d=(await accountCall({action:'connectors'})).data||{},box=by('googleBox');box.replaceChildren();
+    if(!d.googleConfigured){box.textContent='Not set up yet: the owner needs to add a Google OAuth client once (see the setup note from Claude). Redirect URI: '+d.redirectUri;}
+    else if(d.google){
+      const p=document.createElement('div');p.style.fontSize='.82rem';p.textContent='Connected as '+(d.google.email||'your Google account')+' · '+d.google.services.map(x=>({drive:'Drive',gmail:'Gmail',calendar:'Calendar'})[x]).join(', ');
+      const b=document.createElement('button');b.className='btn ghost small';b.type='button';b.textContent='Disconnect';b.style.marginTop='.5rem';
+      b.addEventListener('click',async()=>{b.disabled=true;try{await accountCall({action:'googleDisconnect'});loadConnectors();}catch(e){showMsg('connErr',cleanErr(e,'Could not disconnect.'));b.disabled=false;}});
+      box.append(p,b);
+    }else{
+      ['drive','gmail','calendar'].forEach(sv=>{const l=document.createElement('label');l.className='toggle';const c=document.createElement('input');c.type='checkbox';c.checked=true;c.value=sv;c.className='gsvc';const t=document.createElement('span');t.textContent={drive:'Google Drive',gmail:'Gmail',calendar:'Google Calendar'}[sv];l.append(c,t);box.appendChild(l);});
+      const b=document.createElement('button');b.className='btn';b.type='button';b.textContent='Connect Google';
+      b.addEventListener('click',async()=>{b.disabled=true;try{const services=[...document.querySelectorAll('.gsvc:checked')].map(c=>c.value);const r=(await accountCall({action:'googleStart',services})).data;location.href=r.url;}catch(e){showMsg('connErr',cleanErr(e,'Could not start Google sign-in.'));b.disabled=false;}});
+      box.appendChild(b);
+    }
+    const list=by('mcpList');list.replaceChildren();
+    (d.mcp||[]).forEach(c=>{
+      const row=document.createElement('div'),t=document.createElement('span'),x=document.createElement('button');row.className='fileRow';
+      const ro=c.tools.filter(z=>z.readOnly).length;t.textContent=c.name+' · '+c.tools.length+' tools ('+(c.allowWrites?'all allowed':ro+' read-only in use')+')';t.title=c.url;
+      x.type='button';x.textContent='✕';x.title='Remove';x.addEventListener('click',async()=>{x.disabled=true;try{await accountCall({action:'mcpRemove',connectorId:c.id});row.remove();}catch(e){x.disabled=false;}});
+      row.append(t,x);list.appendChild(row);
+    });
+  }catch(e){showMsg('connErr',cleanErr(e,'Could not load connectors.'));}
+}
+by('mcpAddBtn').addEventListener('click',async()=>{
+  const b=by('mcpAddBtn');b.disabled=true;showMsg('connErr','');showMsg('connInfo','Connecting…');
+  try{
+    const r=(await accountCall({action:'mcpAdd',name:by('mcpName').value,url:by('mcpUrl').value,token:by('mcpToken').value,headerName:by('mcpHeader').value,allowWrites:by('mcpWrites').checked})).data;
+    showMsg('connInfo',r.name+' connected with '+r.tools.length+' tools.');['mcpName','mcpUrl','mcpToken','mcpHeader'].forEach(id=>by(id).value='');by('mcpWrites').checked=false;loadConnectors();
+  }catch(e){showMsg('connInfo','');showMsg('connErr',cleanErr(e,'Could not add the connector.'));}
+  b.disabled=false;
+});
 by('tabPersonal').addEventListener('click',()=>selectTab('personal'));
 by('tabMemory').addEventListener('click',()=>selectTab('memory'));
 by('settingsBtn').addEventListener('click',()=>{if(by('settingsWrap').style.display==='block')show('chatWrap');else openSettings('personal');});
@@ -990,6 +1048,10 @@ async function loadStaff(){
 }
 by('staffBtn').addEventListener('click',()=>{if(by('staffWrap').style.display==='block'){show('chatWrap');by('staffBtn').textContent='Staff';}else{show('staffWrap');by('staffBtn').textContent='Back to chat';loadStaff();}});
 
+// Return from Google sign-in: remember the result and tidy the address bar.
+let connectorReturn=null;
+try{const u=new URL(location.href);if(u.searchParams.get('connector')==='google'){connectorReturn=u.searchParams.get('status')||'error';history.replaceState(null,'','/');}}catch(e){}
+
 // ---------- Sign-in state ----------
 let renderSeq=0,lastUid='';
 async function render(user){
@@ -1014,7 +1076,8 @@ async function render(user){
     if(me.tier==='unverified'){show('verifyWrap');return;}
     ME=me;setAllowance(me.remaining);
     if(me.tier==='owner')by('staffBtn').style.display='inline-block';
-    by('settingsBtn').style.display=saves()?'inline-block':'none';by('skillsBtn').style.display=saves()?'inline-block':'none';mySkills=[];
+    by('settingsBtn').style.display=saves()?'inline-block':'none';by('tabConnectors').style.display=(me.tier==='owner'||me.tier==='staff')?'inline-block':'none';
+    if(connectorReturn&&saves()){const st=connectorReturn;connectorReturn=null;openSettings('connectors');const msg={connected:'Google connected.','no-access':'Google connected, but no access was granted. Try again and tick the boxes.',cancelled:'Google sign-in was cancelled.',expired:'That sign-in link expired. Please try again.',error:'Google sign-in failed. Please try again.'}[st]||'';setTimeout(()=>{showMsg(st==='connected'?'connInfo':'connErr',msg);},400);}by('skillsBtn').style.display=saves()?'inline-block':'none';mySkills=[];
     by('whoLine').textContent=user.isAnonymous?'Guest':((me.name||user.email||'')+' · '+me.tier);
     if(saves()&&changed)await loadChats();else renderChatList();
   }catch(e){console.warn('account check failed',e);}
