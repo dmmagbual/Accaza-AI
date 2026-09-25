@@ -1,4 +1,23 @@
 {
-  "indexes": [],
-  "fieldOverrides": []
+  "indexes": [
+    {
+      "collectionGroup": "chunks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "embedding", "vectorConfig": {"dimension": 768, "flat": {}}}
+      ]
+    }
+  ],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "uploads",
+      "fieldPath": "expireAt",
+      "ttl": true,
+      "indexes": [
+        {"order": "ASCENDING", "queryScope": "COLLECTION"},
+        {"order": "DESCENDING", "queryScope": "COLLECTION"},
+        {"arrayConfig": "CONTAINS", "queryScope": "COLLECTION"}
+      ]
+    }
+  ]
 }

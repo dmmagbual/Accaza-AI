@@ -280,3 +280,48 @@ test("a failed or malformed extraction changes nothing", async () => {
   const out = await Memory.learnFromTurn({db: memDb(), uid: "u", settings: {learn: true}, memories: [], question: "hi", answer: "", key: "k", now: 1, extract: async () => null});
   assert.deepEqual(out, {added: [], updated: [], removed: []});
 });
+
+// ---------- Skills ----------
+const Skills = require("../functions/lib/skills");
+const {combineTools} = require("../functions/lib/tools");
+const {zipSync, strToU8} = require("../functions/node_modules/fflate");
+test("SKILL.md front matter gives the name, description and instructions", () => {
+  const s = Skills.parseSkillMd("---\nname: Barista SOP\ndescription: \"Use for espresso dial-in and bar opening steps\"\n---\n# Steps\n1. Purge the group head.");
+  assert.deepEqual(s, {name: "Barista SOP", description: "Use for espresso dial-in and bar opening steps", instructions: "# Steps\n1. Purge the group head."});
+  assert.equal(Skills.parseSkillMd("Just instructions").instructions, "Just instructions");
+});
+test("chunking covers the whole text with overlap and prefers paragraph breaks", () => {
+  const text = Array.from({length: 30}, (_, i) => `Paragraph ${i}. ` + "word ".repeat(40)).join("\n\n");
+  const chunks = Skills.chunkText(text, 600, 100);
+  assert.ok(chunks.length > 5);
+  assert.ok(chunks.every(c => c.length <= 600));
+  assert.ok(chunks[0].startsWith("Paragraph 0") && chunks.at(-1).includes("Paragraph 29"));
+});
+test("a Claude-style skill .zip is unpacked: SKILL.md, reference files, scripts skipped", () => {
+  const zip = zipSync({"barista/SKILL.md": strToU8("---\nname: Barista\ndescription: Bar SOP\n---\nFollow the SOP."), "barista/references/recipes.md": strToU8("# Latte\n18 g in, 36 g out"), "barista/scripts/run.py": strToU8("print(1)"), "__MACOSX/._x": strToU8("junk")});
+  const out = Skills.readZip(Buffer.from(zip));
+  assert.equal(out.skill.name, "Barista");
+  assert.deepEqual(out.files.map(f => f.name), ["references/recipes.md"]);
+  assert.deepEqual(out.skipped, ["run.py"]);
+});
+test("skill tools: read by name (case-insensitive), search uses vector search on that skill only", async () => {
+  let asked = null;
+  const db = {collection: () => ({doc: id => ({collection: () => ({findNearest: q => { asked = {id, q}; return {get: async () => ({docs: [{data: () => ({file: "recipes.md", text: "Latte: 18 g in"})}]})}; }})})})};
+  const skills = [{id: "s1", name: "Barista SOP", description: "d", instructions: "Do X", files: [{name: "recipes.md"}], chunkCount: 3}];
+  const tools = Skills.skillTools(db, "k", skills, async () => [[0.1, 0.2]]);
+  assert.deepEqual(await tools.run("read_skill", {skill: "barista sop"}), {name: "Barista SOP", instructions: "Do X", files: ["recipes.md"]});
+  const found = await tools.run("search_skill", {skill: "Barista SOP", query: "latte dose"});
+  assert.equal(found.results[0].text, "Latte: 18 g in"); assert.equal(asked.id, "s1"); assert.equal(asked.q.limit, 6);
+  assert.match((await tools.run("read_skill", {skill: "Nope"})).error, /No skill named/);
+});
+test("the catalogue lists skills; a pinned skill's instructions are included", () => {
+  const block = Skills.catalogBlock([{name: "A", description: "for a"}], {name: "A", instructions: "Step 1", files: []});
+  assert.match(block, /- A: for a/); assert.match(block, /selected the skill "A"/); assert.match(block, /Step 1/);
+  assert.equal(Skills.catalogBlock([], null), "");
+});
+test("tool sets combine; unknown tools answer with an error instead of throwing", async () => {
+  const t = combineTools([{declarations: [{name: "a"}], run: async () => ({ok: 1}), labels: {a: () => "Doing A"}}, null, {declarations: [], run: async () => ({})}]);
+  assert.equal(t.declarations.length, 1); assert.equal(t.label("a", {}), "Doing A");
+  assert.deepEqual(await t.run("zzz", {}), {error: "Unknown tool zzz."});
+  assert.equal(combineTools([null]), null);
+});

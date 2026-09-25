@@ -22,6 +22,11 @@ Live at **https://accaza-ai.web.app**.
   - "remember that…" and "forget…" work even with learning off.
   - Up to 50 memories. Card, bank, ID and phone numbers, passwords and health details are never stored (prompt rule plus a server-side filter).
   - Settings → Memory lists every memory, with delete and delete all.
+- **Skills** (registered users), like Claude Skills or custom GPTs: a name, a "when to use" description, instructions, and reference files (.md/.txt/.csv/.json/.pdf).
+  - Claude-style skill **.zip** or **SKILL.md** files can be imported. Front matter gives the name and description, and scripts are skipped.
+  - Files are read once (PDFs through Gemini), chunked and embedded with `gemini-embedding-001` (768-d), and searched with Firestore vector search.
+  - In chat, the AI sees the skill catalogue and calls `read_skill` / `search_skill` tools. Typing **/** pins a skill for the message.
+  - The owner can share a skill with everyone. Members can create up to 5 skills; staff 50.
 - **Saved chats** in a sidebar for registered users (owner, staff, members), with rename, delete and delete all. Guests' chats stay in their browser tab only.
 - Models:
   - Owner and staff start on **Gemini 3.8 Flash**, then **Flash-Lite**.
@@ -41,11 +46,12 @@ Live at **https://accaza-ai.web.app**.
 ## Layout
 
 - `public/`: the web app (`index.html`), manifest, service worker and icons, served by Firebase Hosting.
-- `functions/index.js`: the callables `chat`, `upload` and `account` (region asia-southeast1, App Check enforced).
+- `functions/index.js`: the callables `chat`, `upload`, `skills` and `account` (region asia-southeast1, App Check enforced).
 - `functions/lib/providers.js`: the AI chain, timeouts and reply cleanup.
 - `functions/lib/access.js`: tiers, owner emails and daily limits.
 - `functions/lib/files.js`: attachment checks, the upload cap, the Gemini Files API, owner-bound resolution.
 - `functions/lib/memory.js`: settings, memories, extraction, sensitive-data filter.
+- `functions/lib/skills.js` and `functions/lib/tools.js`: skill storage, ingestion, retrieval tools, and the tool combiner.
 - `functions/lib/chats.js`: saved chats (create, regenerate, edit, list, rename, delete).
 - `firestore.rules`: browsers get no direct database access. Everything goes through the functions.
 - `tests/server.test.js`: unit tests.
@@ -55,6 +61,7 @@ Live at **https://accaza-ai.web.app**.
 - `users/{uid}`: email, name, role (owner/staff/member), status, approval stamps.
 - `users/{uid}/chats/{chatId}` and `.../messages/{id}`: saved chats. Only the server reads or writes them, always under the caller's own uid.
 - `users/{uid}/settings/profile` and `users/{uid}/memories/{id}`: personalisation and memory.
+- `skills/{id}` and `skills/{id}/chunks/{id}` (vector index on `embedding`, defined in `firestore.indexes.json`): skills.
 - `uploads/{id}` (TTL `expireAt`) and `uploadUsage/{day}`: attachments and the daily upload cap.
 - `usage/{day}`: per-person and total message counts for members and guests (Manila day).
 - `chatLog/{id}`: analytics (who asked, which AI answered, and a SHA-256 hash of the question). The question text is not stored here.

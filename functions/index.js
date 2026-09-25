@@ -13,10 +13,12 @@ const Access = require("./lib/access");
 const Chats = require("./lib/chats");
 const Files = require("./lib/files");
 const Memory = require("./lib/memory");
+const Skills = require("./lib/skills");
+const {combineTools} = require("./lib/tools");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.3";
+const RELEASE_VERSION = "1.4";
 const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
@@ -86,6 +88,21 @@ exports.upload = onCall({enforceAppCheck: true, timeoutSeconds: 90, memory: "512
   return Files.saveUpload(db, account.uid, file, stored, now);
 });
 
+// Skills: create, edit, upload files (.md/.txt/.csv/.json/.pdf or a Claude-style skill .zip),
+// delete. Registered accounts only; the owner can publish a skill to everyone.
+exports.skills = onCall({enforceAppCheck: true, timeoutSeconds: 300, memory: "1GiB", secrets: [GEMINI_API_KEY]}, async request => {
+  const db = getFirestore(), actor = await Access.resolveAccount(db, request.auth), data = request.data || {}, action = AI.cleanText(data.action, 20), now = Date.now();
+  if (actor.tier === "guest") throw new HttpsError("failed-precondition", "Sign in to create and use skills.");
+  const key = AI.headerValue(GEMINI_API_KEY.value());
+  if (action === "list") return {skills: (await Skills.visibleSkills(db, actor)).map(s => Skills.publicSkill(s.id, s, actor)).sort((a, b) => b.updatedAt - a.updatedAt), canShare: actor.tier === "owner"};
+  if (action === "get") { const s = await Skills.getVisibleSkill(db, actor, data.skillId); return Object.assign(Skills.publicSkill(s.id, s.data, actor), {instructions: s.data.instructions || ""}); }
+  if (action === "save") return Skills.saveSkill(db, actor, data, now);
+  if (action === "upload") return Skills.uploadSkillFile(db, key, actor, data, now);
+  if (action === "deleteFile") return Skills.deleteSkillFile(db, actor, data, now);
+  if (action === "delete") return Skills.deleteSkill(db, actor, data);
+  throw new HttpsError("invalid-argument", "Unknown action.");
+});
+
 // One chat turn. Streams the reply (chunks {delta} and, when a provider fails mid-reply and the
 // next one takes over, {reset}) and returns the finished answer. Registered users' turns are
 // saved to their chats; guests send their own short history from the browser tab.
@@ -117,10 +134,22 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256M
   const history = plan.history;
   // Personalisation for registered users: "About me", reply preferences and saved memories.
   const [settings, memories] = saves ? await Promise.all([Memory.loadSettings(db, account.uid), Memory.listMemories(db, account.uid)]) : [Memory.DEFAULT_SETTINGS, []];
-  const system = saves ? Memory.personalBlock(settings, memories) : "";
+  // Skills: the caller's own plus published ones; a skill picked with "/" is pinned for this turn.
+  const skills = saves ? await Skills.visibleSkills(db, account) : [];
+  const pinned = saves && data.skillId ? skills.find(s => s.id === String(data.skillId)) || null : null;
+  const geminiKey = AI.headerValue(GEMINI_API_KEY.value());
+  const tools = combineTools([skills.length ? Skills.skillTools(db, geminiKey, skills) : null]);
+  const system = [saves ? Memory.personalBlock(settings, memories) : "", Skills.catalogBlock(skills, pinned)].filter(Boolean).join("\n\n");
+  const toolsUsed = [];
   let result;
   try {
-    result = await AI.withFallback(AI.generalChatProviders({question, history, keys: KEYS, tier: account.tier, files, system}), {
+    result = await AI.withFallback(AI.generalChatProviders({question, history, keys: KEYS, tier: account.tier, files, system, tools}), {
+      onEvent: event => {
+        if (!event || event.type !== "tool" || !tools) return;
+        const label = tools.label(event.name, event.args);
+        if (event.status === "running") toolsUsed.push({name: event.name, label});
+        response.sendChunk({tool: {name: event.name, status: event.status, label}}).catch(() => {});
+      },
       onDelta: piece => { response.sendChunk({delta: piece}).catch(() => {}); },
       onReset: () => { response.sendChunk({reset: true}).catch(() => {}); },
       onUnusual: (answeredBy, failures) => recordProviderHealth(db, account.tier, answeredBy, failures),
@@ -138,7 +167,7 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256M
   }
   // The analytics log keeps who asked, which AI answered and a hash of the question, never the text.
   await db.collection("chatLog").add({at: now, day, uid: account.uid, tier: account.tier, mode, files: files.length, provider: result.provider, model: result.model, backupsTried: result.failures.length, questionHash: crypto.createHash("sha256").update(question).digest("hex"), used: allowance ? allowance.used : null});
-  return {answer: result.answer, provider: result.provider, model: result.model, tier: account.tier, allowance, attachments: files.map(Files.publicFile), memory, chatId: saved && saved.chatId, title: saved && saved.title, userMessageId: saved && saved.userMessageId, modelMessageId: saved && saved.modelMessageId, releaseVersion: RELEASE_VERSION};
+  return {answer: result.answer, provider: result.provider, model: result.model, tier: account.tier, allowance, attachments: files.map(Files.publicFile), memory, tools: toolsUsed.slice(0, 12), skill: pinned ? {id: pinned.id, name: pinned.name} : null, chatId: saved && saved.chatId, title: saved && saved.title, userMessageId: saved && saved.userMessageId, modelMessageId: saved && saved.modelMessageId, releaseVersion: RELEASE_VERSION};
 });
 
 // Account actions. "me" registers the caller on first use and reports their tier and today's
