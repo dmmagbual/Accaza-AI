@@ -153,3 +153,40 @@ test("Manila day rolls over at 00:00 Manila (16:00 UTC)", () => {
   assert.equal(Access.manilaDay(Date.UTC(2026, 8, 25, 15, 59)), "2026-09-25");
   assert.equal(Access.manilaDay(Date.UTC(2026, 8, 25, 16, 0)), "2026-09-26");
 });
+
+// ---------- Step 2: attachments ----------
+const Files = require("../functions/lib/files");
+const b64 = buf => Buffer.from(buf).toString("base64");
+test("uploads are checked by their real bytes, type and size", () => {
+  const png = Buffer.concat([Buffer.from([0x89]), Buffer.from("PNG\r\n\x1a\n"), Buffer.alloc(20)]);
+  assert.equal(Files.validateUpload({mimeType: "image/png", base64: b64(png), name: "a/b<c>.png"}).displayName, "a b c .png");
+  assert.equal(Files.validateUpload({mimeType: "application/pdf", base64: b64(Buffer.from("%PDF-1.7 ...")), name: "x.pdf"}).mimeType, "application/pdf");
+  assert.throws(() => Files.validateUpload({mimeType: "image/png", base64: b64(Buffer.from("%PDF-1.7 fake")), name: "x.png"}), /real image/);
+  assert.throws(() => Files.validateUpload({mimeType: "application/zip", base64: b64(Buffer.from("PK..")), name: "x.zip"}), /Only photos/);
+  assert.throws(() => Files.validateUpload({mimeType: "application/pdf", base64: "A".repeat(10 * 1024 * 1024), name: "big.pdf"}), /7 MB/);
+});
+test("attachments resolve only for their owner and only before they expire", async () => {
+  const now = Date.UTC(2026, 8, 26);
+  const db = fakeDb();
+  db.store.uploads = {f1: {uid: "me", displayName: "a.pdf", mimeType: "application/pdf", uri: "u1", expiresAt: now + 3600e3}, f2: {uid: "other", displayName: "b.png", mimeType: "image/png", uri: "u2", expiresAt: now + 3600e3}, f3: {uid: "me", displayName: "old.png", mimeType: "image/png", uri: "u3", expiresAt: now + 60e3}};
+  assert.deepEqual((await Files.resolveAttachments(db, "me", ["f1"], now)).map(f => f.uri), ["u1"]);
+  await assert.rejects(Files.resolveAttachments(db, "me", ["f2"], now), e => e.code === "not-found");
+  await assert.rejects(Files.resolveAttachments(db, "me", ["f3"], now), e => e.code === "failed-precondition" && /expired/.test(e.message));
+  await assert.rejects(Files.resolveAttachments(db, "me", ["f1", "a", "b", "c"], now), /up to 3/);
+});
+test("with a file attached, Gemini gets a second try before the text-only backups", () => {
+  const f = [{displayName: "menu.pdf", mimeType: "application/pdf", uri: "u"}];
+  assert.equal(AI.generalChatProviders("q", [], {}, "guest", f).map(p => p.name).slice(0, 3).join(">"), "gemini>gemini-lite>groq");
+  assert.equal(AI.generalChatProviders("q", [], {}, "guest").map(p => p.name).slice(0, 2).join(">"), "gemini>groq");
+});
+test("Gemini receives the files; text-only backups are told a file exists", () => {
+  const f = [{displayName: "menu.pdf", mimeType: "application/pdf", uri: "gs://x"}];
+  assert.deepEqual(AI.geminiParts("What is on it?", f), [{fileData: {fileUri: "gs://x", mimeType: "application/pdf"}}, {text: "What is on it?"}]);
+  const msgs = AI.openAiMessages("What is on it?", [{role: "user", text: "earlier", files: f}, {role: "model", text: "ok"}], f);
+  assert.match(msgs[1].content, /^\[Attached: menu\.pdf\]\nearlier$/);
+  assert.match(msgs[3].content, /cannot open attachments right now/);
+});
+test("files only come from the server: browser-supplied history cannot smuggle a file", () => {
+  const h = AI.chatHistory([{role: "user", text: "hi", attachments: ["f2"], files: "nope"}]);
+  assert.deepEqual(h[0].files, []);
+});

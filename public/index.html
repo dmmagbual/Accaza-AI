@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'self'"/>
-<meta name="accaza-ai-build" content="4"/>
+<meta name="accaza-ai-build" content="5"/>
 <meta name="description" content="Accaza AI — a general-chat AI assistant."/>
 <meta name="theme-color" content="#19241b"/>
 <title>Accaza AI</title>
@@ -131,6 +131,21 @@
   #askBtn{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:.55rem .9rem;font-weight:700;cursor:pointer;font-size:.85rem;}
   #askBtn.stop{background:var(--ink);color:var(--bg);}
   #askBtn:disabled{opacity:.5;cursor:default;}
+  #attachBtn{background:transparent;border:0;color:var(--muted);font-size:1.15rem;cursor:pointer;padding:.35rem .3rem;border-radius:8px;align-self:flex-end;}
+  #attachBtn:hover{background:var(--side-hover);color:var(--ink);}
+  #chips{max-width:760px;margin:0 auto .45rem;display:none;flex-wrap:wrap;gap:.4rem;}
+  .chip{display:flex;align-items:center;gap:.4rem;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.3rem .4rem .3rem .3rem;font-size:.76rem;max-width:240px;}
+  .chip img,.chip .icon{width:34px;height:34px;border-radius:6px;object-fit:cover;flex:0 0 34px;display:flex;align-items:center;justify-content:center;background:var(--side);font-size:1rem;}
+  .chip .meta{min-width:0;display:flex;flex-direction:column;}
+  .chip .meta b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .chip .meta small{color:var(--muted);} .chip.error .meta small{color:var(--danger);}
+  .chip button{background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:.9rem;padding:.1rem .25rem;}
+  .files{display:flex;flex-wrap:wrap;gap:.35rem;justify-content:flex-end;margin-bottom:.3rem;max-width:85%;}
+  .files img{max-width:220px;max-height:180px;border-radius:10px;border:1px solid var(--line);display:block;}
+  .files .fileTag{font-size:.74rem;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.3rem .5rem;color:var(--ink);}
+  .files .fileTag.expired{color:var(--muted);text-decoration:line-through;}
+  #dropHint{display:none;position:absolute;inset:0;z-index:30;background:rgba(47,92,67,.18);border:3px dashed var(--accent);align-items:center;justify-content:center;font-weight:700;color:var(--accent-ink);font-size:1.1rem;pointer-events:none;}
+  body.dragging #dropHint{display:flex;}
   .hint{max-width:760px;margin:.35rem auto 0;text-align:center;font-size:.68rem;color:var(--muted);}
 
   /* Owner: staff panel */
@@ -257,14 +272,18 @@
     </div>
     <div id="composer">
       <div id="editBar">Editing your last question.<a id="cancelEdit">Cancel</a></div>
+      <div id="chips"></div>
       <form id="askForm">
-        <textarea id="question" maxlength="4000" rows="1" placeholder="Message Accaza AI" aria-label="Message"></textarea>
+        <button id="attachBtn" type="button" title="Attach photos or PDFs (up to 3, 7 MB each)" aria-label="Attach files">📎</button>
+        <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/heic,image/heif,application/pdf,.heic,.heif" multiple hidden/>
+        <textarea id="question" maxlength="4000" rows="1" placeholder="Message Accaza AI, or attach a photo or PDF" aria-label="Message"></textarea>
         <button id="askBtn" type="submit">Ask</button>
       </form>
       <div class="hint">Accaza AI can make mistakes. Check important information.</div>
     </div>
   </div>
 
+  <div id="dropHint">Drop photos or PDFs to attach</div>
   <div id="staffWrap">
     <div id="staffInner">
       <h2>Staff</h2>
@@ -285,7 +304,7 @@ const app=initializeApp(firebaseConfig);
 const APP_CHECK_SITE_KEY='6LfQgM4tAAAAAPDk6bKu9PMGEmGDgwUUCfNLo1pN';
 try{initializeAppCheck(app,{provider:new ReCaptchaEnterpriseProvider(APP_CHECK_SITE_KEY),isTokenAutoRefreshEnabled:true});}catch(e){console.warn('App Check init failed',e);}
 const auth=getAuth(app),functions=getFunctions(app,'asia-southeast1');
-const chatCall=httpsCallable(functions,'chat',{timeout:130000}),accountCall=httpsCallable(functions,'account',{timeout:40000});
+const chatCall=httpsCallable(functions,'chat',{timeout:130000}),accountCall=httpsCallable(functions,'account',{timeout:60000}),uploadCall=httpsCallable(functions,'upload',{timeout:100000});
 try{await setPersistence(auth,browserLocalPersistence);}catch(_e){}
 
 const by=id=>document.getElementById(id);
@@ -360,7 +379,8 @@ function setAllowance(remaining){
 // ---------- Chats ----------
 let chats=[],current=null,turns=[],busy=false,controller=null,editing=false;
 const GUEST_TURNS='accaza_ai_guest_turns_v2',LAST_CHAT='accaza_ai_last_chat';
-function saveGuestTurns(){if(saves())return;try{sessionStorage.setItem(GUEST_TURNS,JSON.stringify(turns.slice(-24).map(t=>({role:t.role,text:t.text}))));}catch(e){}}
+function fileMeta(f){return {id:f.id,displayName:f.displayName,mimeType:f.mimeType,expiresAt:f.expiresAt};}
+function saveGuestTurns(){if(saves())return;try{sessionStorage.setItem(GUEST_TURNS,JSON.stringify(turns.slice(-24).map(t=>({role:t.role,text:t.text,attachments:(t.attachments||[]).map(fileMeta)}))));}catch(e){}}
 function loadGuestTurns(){try{const r=JSON.parse(sessionStorage.getItem(GUEST_TURNS)||'[]');return Array.isArray(r)?r:[];}catch(e){return [];}}
 function nearBottom(){const s=by('scroller');return s.scrollHeight-s.scrollTop-s.clientHeight<120;}
 function toBottom(force){const s=by('scroller');if(force||nearBottom())s.scrollTop=s.scrollHeight;}
@@ -368,7 +388,16 @@ function toBottom(force){const s=by('scroller');if(force||nearBottom())s.scrollT
 function turnEl(turn){
   const wrap=document.createElement('div'),bubble=document.createElement('div'),actions=document.createElement('div');
   wrap.className='turn '+(turn.role==='user'?'user':'ai');bubble.className='bubble';actions.className='actions';
-  if(turn.role==='user')bubble.textContent=turn.text;else if(turn.error){bubble.classList.add('error');bubble.textContent=turn.text;}else paint(bubble,turn.text,false);
+  if(turn.role==='user'&&turn.attachments&&turn.attachments.length){
+    const files=document.createElement('div');files.className='files';
+    turn.attachments.forEach(f=>{
+      if(f.previewUrl){const img=document.createElement('img');img.src=f.previewUrl;img.alt=f.displayName;files.appendChild(img);return;}
+      const tag=document.createElement('span'),expired=f.expiresAt&&f.expiresAt<Date.now();
+      tag.className='fileTag'+(expired?' expired':'');tag.textContent=(/pdf/.test(f.mimeType)?'📄 ':'🖼 ')+f.displayName+(expired?' (expired)':'');tag.title=expired?'Files are kept for 48 hours':f.displayName;files.appendChild(tag);
+    });
+    wrap.appendChild(files);
+  }
+  if(turn.role==='user'){bubble.textContent=turn.text;if(!turn.text)bubble.style.display='none';}else if(turn.error){bubble.classList.add('error');bubble.textContent=turn.text;}else paint(bubble,turn.text,false);
   wrap.append(bubble,actions);turn.el=wrap;turn.bubble=bubble;turn.actions=actions;return wrap;
 }
 function renderTurns(){
@@ -407,21 +436,28 @@ q.addEventListener('keydown',ev=>{if(ev.key==='Enter'&&!ev.shiftKey&&!ev.isCompo
 
 async function send(mode){
   if(busy)return;
-  let question='',history=[];
+  if(pending.some(p=>p.status==='uploading')){flashChips('Wait for the upload to finish.');return;}
+  let question='',history=[],attach=pending.filter(p=>p.status==='ready');
   const answered=turns.length>=2&&turns[turns.length-1].role==='model'&&turns[turns.length-2].role==='user';
+  let sendIds=null;
   if(mode==='regenerate'||mode==='edit'){
     if(!answered)return;
     const userTurn=turns[turns.length-2];
     question=mode==='edit'?(q.value||'').trim():userTurn.text;
-    if(!question)return;
+    const files=mode==='edit'&&attach.length?attach.map(chipToFile):(userTurn.attachments||[]);
+    if(!question&&!files.length)return;
     turns.splice(mode==='edit'?turns.length-2:turns.length-1);
-    if(mode==='edit'){cancelEdit();turns.push({role:'user',text:question});}
+    if(mode==='edit'){cancelEdit();turns.push({role:'user',text:question,attachments:files});clearChips();}
+    // Registered users: the server reuses the question's files unless new ones were added.
+    sendIds=saves()?(mode==='edit'&&attach.length?files.map(f=>f.id):null):files.map(f=>f.id);
   }else{
-    question=(q.value||'').trim();if(!question)return;
-    q.value='';autosize();
-    turns.push({role:'user',text:question});
+    question=(q.value||'').trim();if(!question&&!attach.length)return;
+    const files=attach.map(chipToFile);
+    q.value='';autosize();clearChips();
+    turns.push({role:'user',text:question,attachments:files});
+    sendIds=files.length?files.map(f=>f.id):null;
   }
-  history=turns.slice(0,-1).filter(t=>!t.error).map(t=>({role:t.role,text:t.text})).slice(-12);
+  history=turns.slice(0,-1).filter(t=>!t.error).map(t=>({role:t.role,text:t.text,attachments:(t.attachments||[]).map(f=>f.id)})).slice(-12);
   const ai={role:'model',text:'',pending:true};turns.push(ai);renderTurns();
   ai.bubble.classList.add('pending','cursor');ai.bubble.textContent='Thinking…';
   setBusy(true);controller=new AbortController();
@@ -433,6 +469,7 @@ async function send(mode){
     if(shown<text.length)frame=setTimeout(draw,16);
   };
   const payload=saves()?{question,mode,chatId:current&&current.id}:{question,history,mode:'new'};
+  if(sendIds&&sendIds.length)payload.attachments=sendIds;
   try{
     const {stream,data}=await chatCall.stream(payload,{signal:controller.signal});
     for await(const chunk of stream){
@@ -465,7 +502,7 @@ async function send(mode){
 }
 
 function newChat(){
-  if(busy)return;current=null;turns=[];cancelEdit();try{sessionStorage.removeItem(LAST_CHAT);sessionStorage.removeItem(GUEST_TURNS);}catch(e){}
+  if(busy)return;current=null;turns=[];cancelEdit();clearChips();try{sessionStorage.removeItem(LAST_CHAT);sessionStorage.removeItem(GUEST_TURNS);}catch(e){}
   renderTurns();renderChatList();show('chatWrap');q.focus();
 }
 by('newChatBtn').addEventListener('click',newChat);
@@ -473,7 +510,7 @@ async function openChat(id,quiet){
   if(busy)return;
   try{
     const data=(await accountCall({action:'messages',chatId:id})).data||{};
-    current={id:data.chat.id,title:data.chat.title};turns=(data.messages||[]).map(m=>({role:m.role,text:m.text,id:m.id}));
+    current={id:data.chat.id,title:data.chat.title};turns=(data.messages||[]).map(m=>({role:m.role,text:m.text,id:m.id,attachments:m.attachments||[]}));
     cancelEdit();renderTurns();renderChatList();show('chatWrap');try{sessionStorage.setItem(LAST_CHAT,id);}catch(e){}
   }catch(e){if(!quiet){chats=chats.filter(c=>c.id!==id);renderChatList();}newChat();}
 }
@@ -526,6 +563,72 @@ async function loadChats(){
   let last='';try{last=sessionStorage.getItem(LAST_CHAT)||'';}catch(e){}
   if(last&&chats.some(c=>c.id===last))openChat(last,true);
 }
+
+// ---------- Attachments (photos and PDFs) ----------
+// Files upload as soon as they are picked, pasted or dropped; the message then refers to them by id.
+// Photos are shrunk to at most 2048 px first, which keeps uploads small and fast.
+const MAX_FILES=3,MAX_BYTES=7*1024*1024,OK_TYPES=['image/png','image/jpeg','image/webp','image/heic','image/heif','application/pdf'];
+let pending=[],chipSeq=0;
+function chipToFile(p){return {id:p.id,displayName:p.name,mimeType:p.mimeType,expiresAt:p.expiresAt,previewUrl:p.previewUrl};}
+function fmtSize(n){return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB';}
+function renderChips(){
+  const box=by('chips');box.replaceChildren();box.style.display=pending.length?'flex':'none';
+  pending.forEach(p=>{
+    const chip=document.createElement('div'),meta=document.createElement('div'),name=document.createElement('b'),state=document.createElement('small'),x=document.createElement('button');
+    chip.className='chip'+(p.status==='error'?' error':'');
+    if(p.previewUrl){const img=document.createElement('img');img.src=p.previewUrl;img.alt='';chip.appendChild(img);}else{const i=document.createElement('span');i.className='icon';i.textContent=/pdf/.test(p.mimeType)?'📄':'🖼';chip.appendChild(i);}
+    name.textContent=p.name;state.textContent=p.status==='uploading'?'Uploading…':p.status==='error'?p.error:fmtSize(p.size);
+    meta.append(name,state);x.type='button';x.textContent='✕';x.title='Remove';x.addEventListener('click',()=>{pending=pending.filter(o=>o!==p);if(p.previewUrl&&!p.id)URL.revokeObjectURL(p.previewUrl);renderChips();});
+    chip.append(meta,x);box.appendChild(chip);
+  });
+}
+function clearChips(){pending=[];renderChips();}
+function flashChips(text){const box=by('chips');box.style.display='flex';const n=document.createElement('small');n.style.color='var(--danger)';n.textContent=text;box.appendChild(n);setTimeout(()=>n.remove(),2500);}
+function typeOf(file){
+  const t=(file.type||'').toLowerCase(),n=(file.name||'').toLowerCase();
+  if(OK_TYPES.includes(t))return t==='image/heif'?'image/heic':t;
+  if(n.endsWith('.heic')||n.endsWith('.heif'))return 'image/heic';
+  if(n.endsWith('.pdf'))return 'application/pdf';
+  return '';
+}
+async function shrinkImage(file,type){
+  if(!/^image\/(png|jpeg|webp)$/.test(type))return {blob:file,type};
+  try{
+    const bmp=await createImageBitmap(file),scale=Math.min(1,2048/Math.max(bmp.width,bmp.height));
+    if(scale===1&&file.size<1.5*1024*1024){bmp.close&&bmp.close();return {blob:file,type};}
+    const c=document.createElement('canvas');c.width=Math.round(bmp.width*scale);c.height=Math.round(bmp.height*scale);
+    c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);bmp.close&&bmp.close();
+    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.85));
+    return blob&&blob.size<file.size?{blob,type:'image/jpeg'}:{blob:file,type};
+  }catch(_e){return {blob:file,type};}
+}
+function toBase64(blob){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]||'');r.onerror=()=>reject(r.error);r.readAsDataURL(blob);});}
+async function addFiles(list){
+  for(const file of Array.from(list||[])){
+    if(pending.length>=MAX_FILES){flashChips('Up to 3 files per message.');break;}
+    const type=typeOf(file);
+    if(!type){flashChips('Only photos (JPG, PNG, WebP, HEIC) and PDFs can be attached.');continue;}
+    const p={local:++chipSeq,name:file.name||'file',mimeType:type,size:file.size,status:'uploading',previewUrl:/^image\/(png|jpeg|webp)$/.test(type)?URL.createObjectURL(file):''};
+    pending.push(p);renderChips();
+    try{
+      const {blob,type:finalType}=await shrinkImage(file,type);
+      if(blob.size>MAX_BYTES)throw new Error('Larger than 7 MB.');
+      p.size=blob.size;p.mimeType=finalType;
+      const res=(await uploadCall({name:p.name,mimeType:finalType,base64:await toBase64(blob)})).data||{};
+      Object.assign(p,{id:res.id,expiresAt:res.expiresAt,status:'ready',name:res.displayName||p.name});
+    }catch(err){p.status='error';p.error=(err&&err.message)||'Upload failed.';}
+    if(pending.includes(p))renderChips();
+  }
+}
+by('attachBtn').addEventListener('click',()=>by('fileInput').click());
+by('fileInput').addEventListener('change',ev=>{addFiles(ev.target.files);ev.target.value='';});
+q.addEventListener('paste',ev=>{const files=ev.clipboardData&&ev.clipboardData.files;if(files&&files.length){ev.preventDefault();addFiles(files);}});
+let dragDepth=0;
+const inChat=()=>by('chatWrap').style.display==='flex';
+window.addEventListener('dragenter',ev=>{if(inChat()&&ev.dataTransfer&&[...ev.dataTransfer.types].includes('Files')){dragDepth++;document.body.classList.add('dragging');}});
+window.addEventListener('dragleave',()=>{dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)document.body.classList.remove('dragging');});
+window.addEventListener('dragover',ev=>{if(inChat())ev.preventDefault();});
+window.addEventListener('drop',ev=>{dragDepth=0;document.body.classList.remove('dragging');if(!inChat())return;ev.preventDefault();if(ev.dataTransfer&&ev.dataTransfer.files.length)addFiles(ev.dataTransfer.files);});
 
 // ---------- Guest mode ----------
 // Guest mode is an explicit choice. Leaving guest mode keeps the same anonymous session, so

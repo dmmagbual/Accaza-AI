@@ -11,10 +11,11 @@ const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const AI = require("./lib/providers");
 const Access = require("./lib/access");
 const Chats = require("./lib/chats");
+const Files = require("./lib/files");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.1";
+const RELEASE_VERSION = "1.2";
 const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
@@ -44,6 +45,46 @@ async function recordProviderHealth(db, surface, answeredBy, failures) {
   } catch (_error) { /* monitoring must never block or fail an answer */ }
 }
 
+// Guests keep their history in the browser; any attachment ids in it are re-checked here so a
+// guest can only ever reference their own, unexpired uploads. Missing ones become a text note.
+async function guestHistoryWithFiles(db, uid, rows, now) {
+  const history = Array.isArray(rows) ? rows.slice(-AI.HISTORY_ENTRIES) : [];
+  const ids = [...new Set(history.flatMap(row => Array.isArray(row && row.attachments) ? row.attachments.slice(0, Files.MAX_PER_MESSAGE).map(String) : []).filter(id => /^[A-Za-z0-9]{1,40}$/.test(id)))].slice(0, 20);
+  const found = {};
+  await Promise.all(ids.map(async id => { const snap = await db.collection("uploads").doc(id).get(); if (snap.exists && snap.data().uid === uid) found[id] = Object.assign({id}, snap.data()); }));
+  return history.map(row => {
+    const own = (Array.isArray(row && row.attachments) ? row.attachments : []).map(id => found[String(id)]).filter(Boolean);
+    const usable = Files.usableFiles(own, now);
+    return {role: row && row.role, text: row && row.text, files: usable, fileNames: own.filter(f => !usable.includes(f)).map(f => `${f.displayName} (expired)`)};
+  });
+}
+function savedHistoryWithFiles(messages, now) {
+  return messages.map(message => {
+    const all = message.attachments || [], usable = Files.usableFiles(all, now);
+    return {role: message.role, text: message.text, files: usable, fileNames: all.filter(f => !usable.includes(f)).map(f => `${f.displayName} (expired)`)};
+  });
+}
+// Deletes upload records and their Gemini copies for one owner (all of them when ids is null).
+async function purgeUploads(db, uid, ids) {
+  const docs = ids === null
+    ? (await db.collection("uploads").where("uid", "==", uid).limit(500).get()).docs
+    : (await Promise.all((ids || []).filter(id => /^[A-Za-z0-9]{1,40}$/.test(id)).map(id => db.collection("uploads").doc(id).get()))).filter(doc => doc.exists && doc.data().uid === uid);
+  const key = AI.headerValue(GEMINI_API_KEY.value());
+  await Promise.all(docs.map(async doc => { await Files.deleteFromGemini(key, doc.data().geminiName); await doc.ref.delete(); }));
+  return docs.length;
+}
+
+// Photo/PDF upload. Counts toward a daily upload cap, not toward chat messages.
+exports.upload = onCall({enforceAppCheck: true, timeoutSeconds: 90, memory: "512MiB", secrets: [GEMINI_API_KEY]}, async request => {
+  const db = getFirestore(), account = await Access.resolveAccount(db, request.auth), now = Date.now();
+  const file = Files.validateUpload(request.data || {});
+  await Files.claimUpload(db, account.uid, Access.manilaDay(now), Access.unlimited(account.tier), now);
+  const key = AI.headerValue(GEMINI_API_KEY.value());
+  if (!key) throw new HttpsError("failed-precondition", "File uploads are not configured.");
+  const stored = await Files.uploadToGemini(key, file);
+  return Files.saveUpload(db, account.uid, file, stored, now);
+});
+
 // One chat turn. Streams the reply (chunks {delta} and, when a provider fails mid-reply and the
 // next one takes over, {reset}) and returns the finished answer. Registered users' turns are
 // saved to their chats; guests send their own short history from the browser tab.
@@ -56,18 +97,26 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256M
     else if (mode !== "new") throw new HttpsError("failed-precondition", "There is no answer to redo in this chat.");
     const messages = chat ? await Chats.recentMessages(chat.ref) : [];
     plan = Chats.planTurn(messages, mode, question);
+    plan.history = savedHistoryWithFiles(plan.history, Date.now());
   } else {
     if (mode !== "new") throw new HttpsError("failed-precondition", "Sign in to regenerate or edit answers.");
-    plan = {question, history: AI.chatHistory(data.history), remove: [], keepUser: null};
+    plan = {question, history: await guestHistoryWithFiles(db, account.uid, data.history, Date.now()), remove: [], keepUser: null, attachments: []};
   }
-  question = plan.question;
+  // New files on this turn replace any carried over from the question being edited/regenerated.
+  const newFiles = Array.isArray(data.attachments) && data.attachments.length ? await Files.resolveAttachments(db, account.uid, data.attachments, Date.now()) : null;
+  if (newFiles && mode === "regenerate") throw new HttpsError("invalid-argument", "Regenerate reuses the question's own files.");
+  if (newFiles) plan.attachments = newFiles;
+  const files = Files.usableFiles(plan.attachments, Date.now());
+  if (plan.attachments.length && files.length < plan.attachments.length) throw new HttpsError("failed-precondition", "An attached file has expired (files are kept for 48 hours). Attach it again in a new message.");
+  question = plan.question || (files.length ? "Please look at the attached file" + (files.length > 1 ? "s." : ".") : "");
+  plan.question = question;
   if (question.length < 2) throw new HttpsError("invalid-argument", "Type a question first.");
   const now = Date.now(), day = Access.manilaDay(now), limited = !Access.unlimited(account.tier);
   const allowance = limited ? await Access.claimMessage(db, account.uid, day, now) : null;
-  const history = plan.history.map(message => ({role: message.role, text: message.text}));
+  const history = plan.history;
   let result;
   try {
-    result = await AI.withFallback(AI.generalChatProviders(question, history, KEYS, account.tier), {
+    result = await AI.withFallback(AI.generalChatProviders(question, history, KEYS, account.tier, files), {
       onDelta: piece => { response.sendChunk({delta: piece}).catch(() => {}); },
       onReset: () => { response.sendChunk({reset: true}).catch(() => {}); },
       onUnusual: (answeredBy, failures) => recordProviderHealth(db, account.tier, answeredBy, failures),
@@ -78,13 +127,13 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "256M
   }
   const saved = saves ? await Chats.saveTurn(db, account.uid, chat, plan, result, now) : null;
   // The analytics log keeps who asked, which AI answered and a hash of the question, never the text.
-  await db.collection("chatLog").add({at: now, day, uid: account.uid, tier: account.tier, mode, provider: result.provider, model: result.model, backupsTried: result.failures.length, questionHash: crypto.createHash("sha256").update(question).digest("hex"), used: allowance ? allowance.used : null});
-  return {answer: result.answer, provider: result.provider, model: result.model, tier: account.tier, allowance, chatId: saved && saved.chatId, title: saved && saved.title, userMessageId: saved && saved.userMessageId, modelMessageId: saved && saved.modelMessageId, releaseVersion: RELEASE_VERSION};
+  await db.collection("chatLog").add({at: now, day, uid: account.uid, tier: account.tier, mode, files: files.length, provider: result.provider, model: result.model, backupsTried: result.failures.length, questionHash: crypto.createHash("sha256").update(question).digest("hex"), used: allowance ? allowance.used : null});
+  return {answer: result.answer, provider: result.provider, model: result.model, tier: account.tier, allowance, attachments: files.map(Files.publicFile), chatId: saved && saved.chatId, title: saved && saved.title, userMessageId: saved && saved.userMessageId, modelMessageId: saved && saved.modelMessageId, releaseVersion: RELEASE_VERSION};
 });
 
 // Account actions. "me" registers the caller on first use and reports their tier and today's
 // allowance. The owner can list accounts and approve or remove staff.
-exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 30, memory: "256MiB"}, async request => {
+exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "256MiB", secrets: [GEMINI_API_KEY]}, async request => {
   const db = getFirestore(), auth = request.auth, data = request.data || {}, action = AI.cleanText(data.action, 20), now = Date.now(), day = Access.manilaDay(now);
   if (!auth || !auth.uid) throw new HttpsError("unauthenticated", "Sign in first.");
   if (action === "me") {
@@ -114,8 +163,8 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 30, memory: "25
     chats: async () => ({chats: await Chats.listChats(db, actor.uid)}),
     messages: () => Chats.listMessages(db, actor.uid, data.chatId),
     renameChat: () => Chats.renameChat(db, actor.uid, data.chatId, data.title),
-    deleteChat: () => Chats.deleteChat(db, actor.uid, data.chatId),
-    deleteAllChats: () => Chats.deleteAllChats(db, actor.uid),
+    deleteChat: async () => { const out = await Chats.deleteChat(db, actor.uid, data.chatId); out.filesDeleted = await purgeUploads(db, actor.uid, out.fileIds); delete out.fileIds; return out; },
+    deleteAllChats: async () => { const out = await Chats.deleteAllChats(db, actor.uid); out.filesDeleted = await purgeUploads(db, actor.uid, null); return out; },
   };
   if (chatActions[action]) {
     if (actor.tier === "guest") throw new HttpsError("failed-precondition", "Sign in to save and open chats.");
