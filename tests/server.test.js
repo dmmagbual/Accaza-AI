@@ -13,9 +13,9 @@ const failure = message => () => Promise.reject(AI.providerFailure(message));
 test("chain order: staff get 3.8 Flash then Flash-Lite; others start on Flash-Lite", () => {
   const P = tier => AI.generalChatProviders({question: "hi", history: [], keys: {}, tier});
   const staff = P("staff"), guest = P("guest");
-  assert.equal(staff.map(p => p.name).join(">"), "gemini>gemini-lite>groq>cerebras>deepseek>ollama>ashna");
+  assert.equal(staff.map(p => p.name).join(">"), "gemini>gemini-lite>groq>cerebras>deepseek>ollama>ashna>jev");
   assert.equal(staff[0].model, "gemini-3.8-flash");
-  assert.equal(guest.map(p => p.name).join(">"), "gemini>groq>cerebras>deepseek>ollama>ashna");
+  assert.equal(guest.map(p => p.name).join(">"), "gemini>groq>cerebras>deepseek>ollama>ashna>jev");
   assert.equal(guest[0].model, "gemini-3.5-flash-lite");
   assert.equal(P("member")[0].model, "gemini-3.5-flash-lite");
 });
@@ -87,6 +87,32 @@ test("streamLines cuts off a provider that sends no text in time, and reports HT
   assert.ok(Date.now() - started < 3000);
   await assert.rejects(AI.streamLines("Gemini", base + "/busy", {}, {firstMs: 2000, totalMs: 5000}, () => {}), e => e.details.providerFailure && /high demand/.test(e.message));
   server.close();
+});
+test("OpenRouter JEV is a secret-backed final fallback with the correct model and attribution", async () => {
+  const missing = AI.builtinProvider("jev", {question: "q", history: [], keys: {}});
+  assert.equal(missing.enabled(), false);
+  const keys = {openrouter: () => "openrouter-token"};
+  const configured = AI.builtinProvider("jev", {question: "q", history: [], keys});
+  assert.equal(configured.enabled(), true);
+  assert.equal(configured.model, "typesafe/jev-router");
+  assert.equal(configured.files, false);
+  assert.equal(configured.tools, true);
+  const originalFetch = global.fetch;
+  const sent = [];
+  global.fetch = async (url, init) => {
+    sent.push({url, headers: init.headers, body: init.body ? JSON.parse(init.body) : null});
+    return new Response('data: {"choices":[{"delta":{"content":"JEV answer"}}]}\n\ndata: [DONE]\n', {status: 200, headers: {"content-type": "text/event-stream"}});
+  };
+  try {
+    const answer = await configured.ask({firstMs: 1000, totalMs: 12000}, {onDelta: () => {}});
+    assert.equal(answer, "JEV answer");
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].url, "https://openrouter.ai/api/v1/chat/completions");
+    assert.equal(sent[0].headers.authorization, "Bearer openrouter-token");
+    assert.equal(sent[0].headers["HTTP-Referer"], "https://accaza-ai.web.app");
+    assert.equal(sent[0].headers["X-OpenRouter-Title"], "Accaza AI");
+    assert.equal(sent[0].body.model, "typesafe/jev-router");
+  } finally { global.fetch = originalFetch; }
 });
 
 const Chats = require("../functions/lib/chats");
@@ -360,6 +386,22 @@ test("web_search uses Google grounding, then the other key, then Wikipedia; sour
   assert.equal(out.engine, "wikipedia"); assert.match(out.summary, /JavaScript runtime/);
   assert.equal(got[0].url, "https://en.wikipedia.org/wiki/Node.js");
 });
+
+test("clear web intent and named-entity questions auto-search for every provider", () => {
+  assert.equal(Web.shouldAutoSearch("Search the web for today's PNG coffee prices"), true);
+  assert.equal(Web.shouldAutoSearch("What is Accaza Coffee House?"), true);
+  assert.equal(Web.shouldAutoSearch("what is accaza coffee house"), true);
+  assert.equal(Web.shouldAutoSearch("Look up Accaza Coffee House"), true);
+  assert.equal(Web.shouldAutoSearch("Who owns Accaza Coffee House?"), true);
+  assert.equal(Web.shouldAutoSearch("Rewrite this paragraph"), false);
+  assert.equal(Web.shouldAutoSearch("What is my saved email?"), false);
+  assert.equal(Web.shouldAutoSearch("What is 2 + 2?"), false);
+  const context = Web.searchContext("What is Accaza Coffee House?", {summary: "A coffee business.", engine: "google"});
+  assert.match(context, /server-managed web search/);
+  assert.match(context, /A coffee business/);
+  assert.match(context, /Do not say that you cannot browse/);
+  assert.equal(Web.searchContext("q", {error: "limit"}), "");
+});
 test("grounded results return the summary and deduplicated sources", async () => {
   const fetchImpl = async () => ({ok: true, json: async () => ({candidates: [{content: {parts: [{text: "Node 26 is current."}]}, groundingMetadata: {groundingChunks: [{web: {uri: "https://a.example/x", title: "nodejs.org"}}, {web: {uri: "https://a.example/x", title: "nodejs.org"}}]}}]})});
   const out = await Web.geminiGrounded("k", "node", fetchImpl);
@@ -464,11 +506,13 @@ test("the model menu depends on the tier and includes shared added models", asyn
   const db = modelsDb({"models/a1": {label: "GPT", provider: "openai", format: "openai", model: "gpt-x", audience: "everyone", enabled: true}, "models/b2": {label: "Claude", provider: "anthropic", format: "anthropic", model: "c", audience: "owner", enabled: true}});
   const guest = (await Models.menu(db, "guest")).map(m => m.id), owner = (await Models.menu(db, "owner")).map(m => m.id);
   assert.deepEqual(guest, ["auto", "gemini-lite", "groq", "cerebras", "deepseek", "custom:a1"]);
-  assert.ok(owner.includes("gemini") && owner.includes("ollama") && owner.includes("custom:b2"));
+  assert.ok(owner.includes("gemini") && owner.includes("ollama") && owner.includes("jev") && owner.includes("custom:b2"));
+  assert.equal(guest.includes("jev"), false);
 });
 test("members cannot pick staff-only models; an added model respects its daily cap", async () => {
   const db = modelsDb({"models/a1": {label: "GPT", provider: "openai", format: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-x", audience: "everyone", dailyCap: 1, enabled: true, keyEnc: Crypto.encrypt("sk-1", KEY)}});
   await assert.rejects(Models.resolvePick(db, "gemini", "member", {}, KEY, "d", 1), e => e.code === "permission-denied");
+  await assert.rejects(Models.resolvePick(db, "jev", "member", {}, KEY, "d", 1), e => e.code === "permission-denied");
   assert.equal(await Models.resolvePick(db, "auto", "member", {}, KEY, "d", 1), null);
   const first = await Models.resolvePick(db, "custom:a1", "member", {}, KEY, "d", 1);
   assert.equal(first.provider.name, "custom:a1");
@@ -487,9 +531,13 @@ test("an added model is tested before saving, and its key is stored encrypted", 
 test("a picked model goes first; the Auto chain stays behind it without duplicates", () => {
   const req = {question: "q", history: [], keys: {}, tier: "member"};
   req.chosen = AI.builtinProvider("groq", req);
-  assert.equal(AI.generalChatProviders(req).map(p => p.name).join(">"), "groq>gemini>cerebras>deepseek>ollama>ashna");
+  assert.equal(AI.generalChatProviders(req).map(p => p.name).join(">"), "groq>gemini>cerebras>deepseek>ollama>ashna>jev");
   req.chosen = AI.builtinProvider("gemini-lite", req);
-  assert.equal(AI.generalChatProviders(req).map(p => p.name).join(">"), "gemini-lite>groq>cerebras>deepseek>ollama>ashna");
+  assert.equal(AI.generalChatProviders(req).map(p => p.name).join(">"), "gemini-lite>groq>cerebras>deepseek>ollama>ashna>jev");
+  req.chosen = AI.builtinProvider("jev", req);
+  const jevFirst = AI.generalChatProviders(req).map(p => p.name);
+  assert.equal(jevFirst.join(">"), "jev>gemini>groq>cerebras>deepseek>ollama>ashna");
+  assert.equal(jevFirst.filter(name => name === "jev").length, 1);
   const withFile = Object.assign({}, req, {files: [{displayName: "a.pdf", mimeType: "application/pdf", uri: "u"}]});
   withFile.chosen = AI.builtinProvider("groq", withFile);
   assert.equal(AI.generalChatProviders(withFile)[0].name, "gemini", "a model that cannot read files is skipped when a file is attached");

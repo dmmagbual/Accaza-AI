@@ -25,7 +25,7 @@ const {getStorage} = require("firebase-admin/storage");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.9";
+const RELEASE_VERSION = "1.11";
 const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
@@ -35,6 +35,7 @@ const DEEPSEEK_API_KEY = defineSecret("DEEPSEEK_API_KEY");
 const OLLAMA_ACCESS_CLIENT_ID = defineSecret("OLLAMA_ACCESS_CLIENT_ID");
 const OLLAMA_ACCESS_CLIENT_SECRET = defineSecret("OLLAMA_ACCESS_CLIENT_SECRET");
 const ASHNA_API_KEY = defineSecret("ASHNA_API_KEY");
+const OPENROUTER_API_KEY = defineSecret("OPENROUTER_API_KEY");
 // Gemini key from the accaza-ai project itself, used for Google Search grounding.
 const WEB_SEARCH_KEY = defineSecret("WEB_SEARCH_KEY");
 // Connectors: AES key for stored tokens, and the Google OAuth client ("unset" until configured).
@@ -44,10 +45,11 @@ const GOOGLE_OAUTH_CLIENT_SECRET = defineSecret("GOOGLE_OAUTH_CLIENT_SECRET");
 const CONNECTOR_SECRETS = [CONNECTOR_TOKEN_KEY, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET];
 const CONNECTOR_TIERS = ["owner", "staff"];
 function googleConfig() { return {clientId: GOOGLE_OAUTH_CLIENT_ID.value().trim(), clientSecret: GOOGLE_OAUTH_CLIENT_SECRET.value().trim(), tokenKey: CONNECTOR_TOKEN_KEY.value().trim()}; }
-const AI_SECRETS = [GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY];
+const AI_SECRETS = [GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY, OPENROUTER_API_KEY];
 const KEYS = {
   gemini: () => GEMINI_API_KEY.value(), groq: () => GROQ_API_KEY.value(), cerebras: () => CEREBRAS_API_KEY.value(), deepseek: () => DEEPSEEK_API_KEY.value(),
   ollamaId: () => OLLAMA_ACCESS_CLIENT_ID.value(), ollamaSecret: () => OLLAMA_ACCESS_CLIENT_SECRET.value(), ashna: () => ASHNA_API_KEY.value(),
+  openrouter: () => OPENROUTER_API_KEY.value(),
 };
 
 // Only unusual outcomes are written (a backup answered, or nothing answered).
@@ -163,6 +165,24 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 300, memory: "512M
     response.sendChunk({sources}).catch(() => {});
   };
   const web = Web.webTools({db, uid: account.uid, day, unlimited: Access.unlimited(account.tier), keys: {search: AI.headerValue(WEB_SEARCH_KEY.value()), chat: geminiKey}, onSources: addSources, now});
+  // Do not rely solely on a model deciding to call a tool. For clear web/current/entity lookups,
+  // search once on the server and give the evidence to every provider, including no-tool models.
+  const toolsUsed = [];
+  let autoWebContext = "";
+  if (Web.shouldAutoSearch(question)) {
+    const args = {query: question}, label = `Searching the web: ${AI.cleanText(question, 80)}`;
+    toolsUsed.push({name: "web_search", label});
+    await response.sendChunk({tool: {name: "web_search", status: "running", label}}).catch(() => {});
+    let found;
+    try { found = await web.run("web_search", args); }
+    catch (error) {
+      console.warn(JSON.stringify({event: "automatic_web_search_failed", message: String(error && error.message || error).slice(0, 200)}));
+      found = {error: "Web search is unavailable right now."};
+    }
+    const status = found && found.error ? "failed" : "done";
+    await response.sendChunk({tool: {name: "web_search", status, label}}).catch(() => {});
+    autoWebContext = Web.searchContext(question, found);
+  }
   // Connectors (owner/staff): Google Drive/Gmail/Calendar read-only, and MCP servers.
   let connectorTools = [], connectorNote = "";
   if (CONNECTOR_TIERS.includes(account.tier)) {
@@ -186,8 +206,7 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 300, memory: "512M
   const canvasToolSet = big ? Canvas.canvasTools(db, account.uid, canvasState, now, info => { canvasInfo = {id: info.id, title: info.title, kind: info.kind, version: info.version}; response.sendChunk({canvas: info}).catch(() => {}); }) : null;
   const tools = combineTools([canvasToolSet, skills.length ? Skills.skillTools(db, geminiKey, skills) : null, web, ...connectorTools]);
   const today = `Today's date in Manila is ${Access.manilaDay(now)}.`;
-  const system = [today, big ? Canvas.canvasBlock(canvasState.canvas, data.canvasSelection) : "", Web.GUIDE, connectorNote, saves ? Memory.personalBlock(settings, memories) : "", Skills.catalogBlock(skills, pinned)].filter(Boolean).join("\n\n");
-  const toolsUsed = [];
+  const system = [today, big ? Canvas.canvasBlock(canvasState.canvas, data.canvasSelection) : "", Web.GUIDE, autoWebContext, connectorNote, saves ? Memory.personalBlock(settings, memories) : "", Skills.catalogBlock(skills, pinned)].filter(Boolean).join("\n\n");
   let result, picked = null;
   try {
     // Model menu: "auto" keeps the normal chain; a picked model goes first with the chain behind it.
