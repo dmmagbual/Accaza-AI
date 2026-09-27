@@ -1,0 +1,21 @@
+# Pinned so every rebuild gives the same sandbox (latest releases on 26 Sep 2026, Python 3.12).
+# Documents
+python-docx==1.2.0
+openpyxl==3.1.5
+XlsxWriter==3.2.9
+python-pptx==1.0.2
+reportlab==5.0.1
+pypdf==6.19.0
+pdfplumber==0.11.10
+markdown==3.11
+# Data and charts
+pandas==3.0.6
+numpy==2.5.3
+matplotlib==3.11.2
+tabulate==0.10.0
+# Images and text
+pillow==12.3.0
+beautifulsoup4==4.15.0
+lxml==6.1.3
+jinja2==3.1.6
+python-dateutil==2.9.0.post0

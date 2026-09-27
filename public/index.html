@@ -192,6 +192,31 @@
   .srcs a:hover{border-color:var(--accent);}
   .toolLine{font-size:.74rem;color:var(--muted);margin:.1rem 0 .3rem;}
   .toolLine.live::before{content:'⚙ ';}
+  /* Laptop tasks */
+  #taskBtn{background:transparent;border:1px solid var(--line);color:var(--muted);font:inherit;font-size:.74rem;font-weight:600;cursor:pointer;padding:.35rem .5rem;border-radius:8px;align-self:flex-end;margin-bottom:.1rem;white-space:nowrap;}
+  #taskBtn:hover{color:var(--ink);border-color:var(--input-line);}
+  #taskBtn.on{background:var(--accent-soft);color:var(--accent-ink);border-color:var(--accent);}
+  #askForm.taskMode{border-color:var(--accent);}
+  @media (max-width:520px){#taskBtn .lbl{display:none;}}
+  .taskCard{border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:.7rem .8rem;margin:.2rem 0 .3rem;max-width:620px;}
+  .taskHead{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;font-size:.8rem;}
+  .taskHead b{font-size:.86rem;}
+  .pill{font-size:.7rem;font-weight:700;border-radius:99px;padding:.12rem .5rem;background:var(--side);color:var(--muted);}
+  .pill.running{background:var(--accent-soft);color:var(--accent-ink);} .pill.waiting{background:var(--warn-bg);color:var(--warn-ink);}
+  .pill.done{background:var(--accent);color:#fff;} .pill.failed{background:transparent;color:var(--danger);border:1px solid var(--danger);}
+  .taskHead .sp{flex:1;} .taskHead small{color:var(--muted);}
+  .taskNote{font-size:.74rem;color:var(--warn-ink);background:var(--warn-bg);border:1px solid var(--warn-line);border-radius:8px;padding:.35rem .55rem;margin-top:.45rem;}
+  .taskPlan{list-style:none;margin:.5rem 0 0;padding:0;font-size:.8rem;}
+  .taskPlan li{padding:.12rem 0;} .taskPlan li::before{content:'○ ';color:var(--muted);} .taskPlan li.done{color:var(--muted);} .taskPlan li.done::before{content:'✓ ';color:var(--ok);}
+  .taskLog{margin-top:.5rem;border-top:1px dashed var(--line);padding-top:.4rem;font-size:.76rem;}
+  .taskLog .ev{padding:.12rem 0;color:var(--muted);} .taskLog .ev.failed{color:var(--danger);} .taskLog .ev.text{color:var(--ink);}
+  .taskLog details summary{cursor:pointer;} .taskLog pre{white-space:pre-wrap;background:var(--code-bg);border-radius:6px;padding:.4rem .5rem;margin:.25rem 0;font-size:.7rem;max-height:220px;overflow:auto;color:var(--ink);}
+  .taskLog .more{background:transparent;border:0;color:var(--accent-ink);cursor:pointer;font-size:.74rem;padding:.1rem 0;text-decoration:underline;}
+  .taskAsk{margin-top:.55rem;display:flex;flex-direction:column;gap:.4rem;} .taskAsk p{margin:0;font-size:.86rem;font-weight:600;}
+  .taskAsk textarea{width:100%;box-sizing:border-box;border:1px solid var(--input-line);background:var(--input);color:var(--ink);border-radius:8px;padding:.45rem;font:inherit;font-size:.85rem;resize:vertical;min-height:3rem;}
+  .taskFiles{margin-top:.5rem;display:flex;flex-direction:column;gap:.3rem;}
+  .taskBtns{display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap;}
+  .taskSummary{margin-top:.5rem;font-size:.9rem;}
   /* Canvas */
   #canvasPanel{display:none;flex:0 0 56%;min-width:0;border-left:1px solid var(--line);background:var(--panel);flex-direction:column;min-height:0;}
   body.canvasOpen #canvasPanel{display:flex;}
@@ -271,6 +296,7 @@
       <div class="who" id="whoLine"></div>
       <div class="row">
         <button id="canvasesBtn" type="button" style="display:none">Canvases</button>
+        <button id="tasksBtn" type="button" style="display:none">Tasks</button>
         <button id="skillsBtn" type="button" style="display:none">Skills</button>
         <button id="settingsBtn" type="button" style="display:none">Settings</button>
         <button id="themeBtn" type="button">Theme: auto</button>
@@ -357,6 +383,8 @@
       <div id="skillMenu"></div>
       <div id="chips"></div>
       <form id="askForm">
+        <button id="taskBtn" type="button" aria-pressed="false" title="Task mode: your laptop works on it step by step (code, files, research)" style="display:none">⚙<span class="lbl"> Task</span></button>
+        <input id="taskFileInput" type="file" multiple hidden accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.md,.csv,.tsv,.json,.xml,.html,.xlsx,.xls,.docx,.doc,.pptx,.zip"/>
         <button id="attachBtn" type="button" title="Attach photos or PDFs (up to 3, 7 MB each)" aria-label="Attach files">📎</button>
         <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/heic,image/heif,application/pdf,.heic,.heif" multiple hidden/>
         <select id="modelSelect" title="Choose the AI model" aria-label="AI model"><option value="auto">Auto</option></select>
@@ -490,6 +518,9 @@
   <div id="canvasesWrap" style="display:none;flex:1;min-height:0;overflow:auto;padding:1rem;">
     <div style="max-width:760px;margin:0 auto"><h2 style="font-family:'Playfair Display',serif;font-size:1.25rem;margin:0 0 .6rem;color:var(--accent-ink)">Canvases &amp; sites</h2><div id="canvasList"></div></div>
   </div>
+  <div id="tasksWrap" style="display:none;flex:1;min-height:0;overflow:auto;padding:1rem;">
+    <div style="max-width:760px;margin:0 auto"><h2 style="font-family:'Playfair Display',serif;font-size:1.25rem;margin:0 0 .3rem;color:var(--accent-ink)">Tasks</h2><p id="tasksWorker" style="font-size:.8rem;color:var(--muted);margin:0 0 .7rem"></p><div id="taskList"></div></div>
+  </div>
   <div id="staffWrap">
     <div id="staffInner">
       <h2>Staff</h2>
@@ -544,10 +575,10 @@ async function copyText(text,button){
 }
 
 // ---------- Views ----------
-const VIEWS=['loginWrap','registerWrap','resetWrap','verifyWrap','chatWrap','staffWrap','settingsWrap','skillsWrap','canvasesWrap'];
+const VIEWS=['loginWrap','registerWrap','resetWrap','verifyWrap','chatWrap','staffWrap','settingsWrap','skillsWrap','canvasesWrap','tasksWrap'];
 function show(view){
-  VIEWS.forEach(v=>{by(v).style.display=v===view?(v==='staffWrap'||v==='settingsWrap'||v==='skillsWrap'||v==='canvasesWrap'?'block':'flex'):'none';});
-  const inApp=view==='chatWrap'||view==='staffWrap'||view==='settingsWrap'||view==='skillsWrap'||view==='canvasesWrap';
+  VIEWS.forEach(v=>{by(v).style.display=v===view?(v==='staffWrap'||v==='settingsWrap'||v==='skillsWrap'||v==='canvasesWrap'||v==='tasksWrap'?'block':'flex'):'none';});
+  const inApp=view==='chatWrap'||view==='staffWrap'||view==='settingsWrap'||view==='skillsWrap'||view==='canvasesWrap'||view==='tasksWrap';
   if(view!=='chatWrap')document.body.classList.remove('canvasOpen');
   by('topbarActions').style.display=inApp?'flex':'none';by('sidebar').style.display=inApp?'flex':'none';by('menuBtn').style.visibility=inApp?'visible':'hidden';
   closeSide();
@@ -612,6 +643,15 @@ function turnEl(turn){
     });
     wrap.appendChild(files);
   }
+  if(turn.role==='user'&&turn.taskFiles&&turn.taskFiles.length){
+    const files=document.createElement('div');files.className='files';
+    turn.taskFiles.forEach(n=>{const tag=document.createElement('span');tag.className='fileTag';tag.textContent='📎 '+n;files.appendChild(tag);});
+    wrap.appendChild(files);
+  }
+  if(turn.role==='model'&&turn.task){
+    bubble.style.display='none';wrap.append(taskCardEl(turn),bubble,actions);
+    turn.el=wrap;turn.bubble=bubble;turn.actions=actions;return wrap;
+  }
   if(turn.role==='model'&&turn.tools&&turn.tools.length){const tl=document.createElement('div');tl.className='toolLine';tl.textContent='Used: '+turn.tools.map(t=>t.label).join(' · ');wrap.appendChild(tl);}
   if(turn.role==='user'){bubble.textContent=turn.text;if(!turn.text)bubble.style.display='none';}else if(turn.error){bubble.classList.add('error');bubble.textContent=turn.text;}else paint(bubble,turn.text,false);
   wrap.append(bubble);
@@ -626,10 +666,11 @@ function renderTurns(){
 function actionButton(label,handler){const b=document.createElement('button');b.type='button';b.textContent=label;b.addEventListener('click',handler);return b;}
 function refreshActions(){
   const lastAi=[...turns].reverse().find(t=>t.role==='model'&&!t.error),lastUser=[...turns].reverse().find(t=>t.role==='user');
-  const answeredLast=turns.length>=2&&turns[turns.length-1].role==='model'&&!turns[turns.length-1].error&&turns[turns.length-2].role==='user';
+  const answeredLast=turns.length>=2&&turns[turns.length-1].role==='model'&&!turns[turns.length-1].error&&turns[turns.length-2].role==='user'&&!turns[turns.length-1].task;
   turns.forEach(t=>{
     if(!t.actions)return;t.actions.replaceChildren();
     if(t.pending)return;
+    if(t.task){if(t.text)t.actions.append(actionButton('Copy',e=>copyText(t.text,e.currentTarget)));return;}
     if(t.role==='model'&&!t.error){
       if(t.memory){const n=document.createElement('button');n.type='button';n.className='memNote';n.textContent='Memory updated ✓';n.title=t.memory;n.addEventListener('click',()=>openSettings('memory'));t.actions.append(n);}
       t.actions.append(actionButton('Copy',e=>copyText(t.text,e.currentTarget)));
@@ -656,6 +697,7 @@ q.addEventListener('keydown',ev=>{if(ev.key==='Enter'&&!ev.shiftKey&&!ev.isCompo
 
 async function send(mode){
   if(busy)return;
+  if(taskMode&&mode==='new'){sendTask();return;}
   if(pending.some(p=>p.status==='uploading')){flashChips('Wait for the upload to finish.');return;}
   let question='',history=[],attach=pending.filter(p=>p.status==='ready');
   const answered=turns.length>=2&&turns[turns.length-1].role==='model'&&turns[turns.length-2].role==='user';
@@ -755,7 +797,7 @@ async function openChat(id,quiet){
   if(cv&&cv.chatId!==id){cv=null;closeCanvas();}
   try{
     const data=(await accountCall({action:'messages',chatId:id})).data||{};
-    current={id:data.chat.id,title:data.chat.title};turns=(data.messages||[]).map(m=>({role:m.role,text:m.text,id:m.id,attachments:m.attachments||[],sources:m.sources||[],canvas:m.canvas||null}));
+    current={id:data.chat.id,title:data.chat.title};turns=(data.messages||[]).map(m=>({role:m.role,text:m.text,id:m.id,attachments:m.attachments||[],sources:m.sources||[],canvas:m.canvas||null,task:m.task||null,taskFiles:m.taskFiles||[]}));
     cancelEdit();renderTurns();renderChatList();show('chatWrap');applyModelFor(id);try{sessionStorage.setItem(LAST_CHAT,id);}catch(e){}
   }catch(e){if(!quiet){chats=chats.filter(c=>c.id!==id);renderChatList();}newChat();}
 }
@@ -1031,10 +1073,17 @@ by('deleteMemoriesBtn').addEventListener('click',async()=>{
 // Photos are shrunk to at most 2048 px first, which keeps uploads small and fast.
 const MAX_FILES=3,MAX_BYTES=7*1024*1024,OK_TYPES=['image/png','image/jpeg','image/webp','image/heic','image/heif','application/pdf'];
 let pending=[],chipSeq=0;
+let taskMode=false,taskFiles=[];// laptop tasks (see below)
 function chipToFile(p){return {id:p.id,displayName:p.name,mimeType:p.mimeType,expiresAt:p.expiresAt,previewUrl:p.previewUrl};}
 function fmtSize(n){return n>1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB';}
 function renderChips(){
-  const box=by('chips');box.replaceChildren();box.style.display=pending.length||pinnedSkill?'flex':'none';
+  const box=by('chips');box.replaceChildren();box.style.display=pending.length||pinnedSkill||(taskMode&&taskFiles.length)?'flex':'none';
+  if(taskMode)taskFiles.forEach(f=>{
+    const chip=document.createElement('div'),meta=document.createElement('div'),name=document.createElement('b'),state=document.createElement('small'),x=document.createElement('button'),i=document.createElement('span');
+    chip.className='chip';i.className='icon';i.textContent='📎';name.textContent=f.name;state.textContent=fmtSize(f.size)+' · for the task';meta.className='meta';meta.append(name,state);
+    x.type='button';x.textContent='✕';x.title='Remove';x.addEventListener('click',()=>{taskFiles=taskFiles.filter(o=>o!==f);renderChips();});
+    chip.append(i,meta,x);box.appendChild(chip);
+  });
   if(pinnedSkill){const c=document.createElement('span'),x=document.createElement('button');c.className='skillChip';c.textContent='✦ '+pinnedSkill.name;x.type='button';x.textContent='✕';x.title='Stop using this skill';x.addEventListener('click',()=>{pinnedSkill=null;renderChips();});c.appendChild(x);box.appendChild(c);}
   pending.forEach(p=>{
     const chip=document.createElement('div'),meta=document.createElement('div'),name=document.createElement('b'),state=document.createElement('small'),x=document.createElement('button');
@@ -1067,6 +1116,7 @@ async function shrinkImage(file,type){
 }
 function toBase64(blob){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]||'');r.onerror=()=>reject(r.error);r.readAsDataURL(blob);});}
 async function addFiles(list){
+  if(taskMode){addTaskFiles(list);return;}
   for(const file of Array.from(list||[])){
     if(pending.length>=MAX_FILES){flashChips('Up to 3 files per message.');break;}
     const type=typeOf(file);
@@ -1083,7 +1133,7 @@ async function addFiles(list){
     if(pending.includes(p))renderChips();
   }
 }
-by('attachBtn').addEventListener('click',()=>by('fileInput').click());
+by('attachBtn').addEventListener('click',()=>by(taskMode?'taskFileInput':'fileInput').click());
 by('fileInput').addEventListener('change',ev=>{addFiles(ev.target.files);ev.target.value='';});
 q.addEventListener('paste',ev=>{const files=ev.clipboardData&&ev.clipboardData.files;if(files&&files.length){ev.preventDefault();addFiles(files);}});
 let dragDepth=0;
@@ -1427,6 +1477,203 @@ async function openCanvases(){
 }
 by('canvasesBtn').addEventListener('click',()=>{if(by('canvasesWrap').style.display==='block')show('chatWrap');else openCanvases();});
 
+// ---------- Laptop tasks (owner only) ----------
+// "⚙ Task" sends the message to the worker on the owner's laptop, which works on it step by step in
+// a Docker sandbox (code, files, web research). The card polls the tasks callable for progress.
+const tasksCall=httpsCallable(functions,'tasks',{timeout:130000});
+const TASK_FILE_MAX=10*1024*1024,TASK_FILES_MAX=5,TASK_TOTAL_MAX=15*1024*1024;
+const TASK_EXT=['pdf','png','jpg','jpeg','webp','gif','txt','md','csv','tsv','json','xml','html','xlsx','xls','docx','doc','pptx','zip'];
+const TASK_LABEL={queued:'Queued',running:'Working',waiting:'Needs your answer',done:'Done',failed:'Failed',stopped:'Stopped'};
+const TASK_ACTIVE=['queued','running','waiting'],TASK_ICON={running:'⏳',done:'✓',failed:'✕',stopping:'…'};
+const taskWatch={};
+function mk(tag,text,cls){const e=document.createElement(tag);if(text!=null)e.textContent=text;if(cls)e.className=cls;return e;}
+function fmtDur(ms){const s=Math.max(0,Math.round(ms/1000));return s<60?s+' s':Math.floor(s/60)+' min '+(s%60)+' s';}
+function setTaskMode(on){
+  taskMode=Boolean(on)&&ME.tier==='owner';
+  const b=by('taskBtn');b.classList.toggle('on',taskMode);b.setAttribute('aria-pressed',String(taskMode));
+  by('askForm').classList.toggle('taskMode',taskMode);
+  q.placeholder=taskMode?'Describe a task for your laptop…':'Message Accaza AI, or attach a photo or PDF';
+  by('attachBtn').title=taskMode?'Attach files for the task (up to 5, 10 MB each)':'Attach photos or PDFs (up to 3, 7 MB each)';
+  by('modelSelect').style.display=taskMode?'none':'';
+  if(taskMode&&pending.length)pending=[];
+  if(!taskMode)taskFiles=[];
+  renderChips();
+}
+by('taskBtn').addEventListener('click',()=>{setTaskMode(!taskMode);q.focus();});
+function addTaskFiles(list){
+  for(const f of Array.from(list||[])){
+    const ext=(String(f.name).split('.').pop()||'').toLowerCase();
+    if(taskFiles.length>=TASK_FILES_MAX){flashChips('Up to 5 files per task.');break;}
+    if(!TASK_EXT.includes(ext)){flashChips('"'+f.name+'" is not a supported file type for tasks.');continue;}
+    if(f.size>TASK_FILE_MAX){flashChips('"'+f.name+'" is larger than 10 MB.');continue;}
+    if(taskFiles.reduce((t,x)=>t+x.size,0)+f.size>TASK_TOTAL_MAX){flashChips('Task files can total up to 15 MB.');break;}
+    taskFiles.push(f);
+  }
+  renderChips();
+}
+by('taskFileInput').addEventListener('change',ev=>{addTaskFiles(ev.target.files);ev.target.value='';});
+
+async function sendTask(){
+  const prompt=(q.value||'').trim(),files=taskFiles.slice();
+  if(!prompt&&!files.length)return;
+  by('askBtn').disabled=true;
+  let inputs;
+  try{inputs=await Promise.all(files.map(async f=>({name:f.name,data:await toBase64(f)})));}
+  catch(_e){flashChips('Could not read one of the files.');by('askBtn').disabled=false;return;}
+  const user={role:'user',text:prompt||'Please work with the attached files.',taskFiles:files.map(f=>f.name),task:{id:''}},ai={role:'model',text:'',task:{id:'',status:'queued'}};
+  q.value='';autosize();taskFiles=[];renderChips();turns.push(user,ai);renderTurns();
+  try{
+    const r=(await tasksCall({action:'create',prompt,chatId:current&&current.id,inputs})).data;
+    user.task={id:r.taskId};ai.task={id:r.taskId,status:'queued'};
+    current={id:r.chatId,title:r.title||(current&&current.title)||prompt.slice(0,60)};
+    chats=[{id:current.id,title:current.title},...chats.filter(c=>c.id!==current.id)];renderChatList();
+    try{sessionStorage.setItem(LAST_CHAT,current.id);}catch(e){}
+    renderTurns();
+  }catch(err){
+    turns.splice(turns.indexOf(user),2,{role:'user',text:user.text},{role:'model',error:true,text:cleanErr(err,'Could not send the task.')});
+    renderTurns();q.value=prompt;autosize();taskFiles=files;renderChips();
+  }finally{by('askBtn').disabled=false;}
+}
+
+function taskCardEl(turn){
+  const c=mk('div',null,'taskCard');
+  const ui={card:c,head:mk('div',null,'taskHead'),note:mk('div',null,'taskNote'),plan:mk('ul',null,'taskPlan'),ask:mk('div',null,'taskAsk'),summary:mk('div',null,'taskSummary'),files:mk('div',null,'taskFiles'),log:mk('div',null,'taskLog'),btns:mk('div',null,'taskBtns')};
+  c.append(ui.head,ui.note,ui.plan,ui.ask,ui.summary,ui.files,ui.log,ui.btns);
+  [ui.note,ui.plan,ui.ask,ui.summary,ui.files,ui.log,ui.btns].forEach(e=>{e.style.display='none';});
+  turn.taskUi=ui;
+  if(!turn.task.id){ui.head.textContent='⚙ Sending the task to your laptop…';return c;}
+  const w=taskWatch[turn.task.id]||(taskWatch[turn.task.id]={id:turn.task.id,since:0,events:[],data:null,worker:null,timer:0,showAll:false,open:{}});
+  w.turn=turn;
+  if(w.data)drawTask(w);else ui.head.textContent='⚙ Loading the task…';
+  pollTask(w,true);
+  return c;
+}
+function pollTask(w,soon){
+  clearTimeout(w.timer);
+  const run=async()=>{
+    if(!w.turn||!w.turn.taskUi||!w.turn.taskUi.card.isConnected){w.timer=0;return;}
+    try{
+      const r=(await tasksCall({action:'get',taskId:w.id,since:w.since})).data;
+      const before=w.data&&w.data.status;w.data=r.task;w.worker=r.worker;w.err='';
+      (r.events||[]).forEach(e=>{if(e.seq>w.since){w.events.push(e);w.since=e.seq;}});
+      if(w.events.length>500)w.events=w.events.slice(-500);
+      drawTask(w);
+      if(before&&before!==r.task.status&&!TASK_ACTIVE.includes(r.task.status)){refreshActions();toBottom(false);}
+    }catch(err){
+      w.err=cleanErr(err,'Could not load the task.');drawTask(w);
+      if(err&&err.code==='functions/not-found'){w.timer=0;return;}
+    }
+    const st=w.data&&w.data.status;
+    if(!w.data||TASK_ACTIVE.includes(st))w.timer=setTimeout(run,document.hidden?15000:st==='running'?2000:5000);else w.timer=0;
+  };
+  w.timer=setTimeout(run,soon?0:2000);
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)Object.values(taskWatch).forEach(w=>{if(w.timer&&w.data&&TASK_ACTIVE.includes(w.data.status))pollTask(w,true);});});
+
+function taskLogLines(events){
+  const runs={},lines=[];
+  events.forEach(e=>{
+    if(e.type==='tool'&&e.status==='running'){const l=Object.assign({},e);runs[e.seq]=l;lines.push(l);}
+    else if(e.type==='tool'&&e.of&&runs[e.of])Object.assign(runs[e.of],e,{seq:e.of});
+    else lines.push(Object.assign({},e));
+  });
+  return lines;
+}
+function drawTask(w){
+  const turn=w.turn;if(!turn||!turn.taskUi)return;
+  const ui=turn.taskUi,t=w.data;
+  if(!t){ui.head.textContent='⚙ '+(w.err||'Loading the task…');return;}
+  const active=TASK_ACTIVE.includes(t.status);
+  // Header
+  const pill=mk('span',t.stopRequested&&t.status==='running'?'Stopping…':(TASK_LABEL[t.status]||t.status),'pill '+t.status);
+  const bits=[];if(t.steps)bits.push(t.steps+' step'+(t.steps>1?'s':''));if(t.startedAt)bits.push(fmtDur((t.finishedAt||Date.now())-t.startedAt));
+  ui.head.replaceChildren(mk('b','⚙ Task'),pill,mk('span','','sp'),mk('small',bits.join(' · ')));
+  // Laptop / Docker notes
+  let note=w.err||'';
+  if(!note&&active&&t.status!=='waiting'&&w.worker&&!w.worker.online)note='Your laptop is offline. The task starts (or continues) as soon as the laptop is on with the worker and Docker running.';
+  else if(!note&&t.status==='queued'&&w.worker&&w.worker.online&&!w.worker.docker)note='Docker is not running on your laptop. Start Docker Desktop and the task will begin.';
+  ui.note.textContent=note;ui.note.style.display=note?'block':'none';
+  // Plan
+  const plan=t.plan||[];ui.plan.replaceChildren(...plan.map(p=>mk('li',p.text,p.done?'done':'')));ui.plan.style.display=plan.length?'block':'none';
+  // Question from the task
+  if(t.status==='waiting'&&t.question){
+    if(ui.ask.dataset.q!==t.question){
+      const ta=mk('textarea');ta.rows=2;ta.placeholder='Type your answer (Ctrl+Enter sends)';ta.maxLength=2000;
+      const send=mk('button','Send answer','btn small');send.type='button';
+      const err=mk('small','');err.style.color='var(--danger)';
+      send.addEventListener('click',async()=>{const text=ta.value.trim();if(!text){ta.focus();return;}send.disabled=true;try{await tasksCall({action:'reply',taskId:t.id,text});ui.ask.dataset.q='';ui.ask.style.display='none';pollTask(w,true);}catch(e){err.textContent=cleanErr(e,'Could not send the answer.');send.disabled=false;}});
+      ta.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();send.click();}});
+      const row=mk('div');row.style.display='flex';row.style.gap='.5rem';row.style.alignItems='center';row.append(send,err);
+      ui.ask.replaceChildren(mk('p','❓ '+t.question),ta,row);ui.ask.dataset.q=t.question;
+    }
+    ui.ask.style.display='flex';
+  }else{ui.ask.style.display='none';ui.ask.dataset.q='';}
+  // Result
+  ui.summary.style.color='';
+  if(t.status==='done'&&t.summary){if(ui.summary.dataset.raw!==t.summary)paint(ui.summary,t.summary,false);ui.summary.style.display='block';turn.text=t.summary;}
+  else if(t.status==='failed'||t.status==='stopped'){ui.summary.textContent=t.status==='failed'?'The task could not finish: '+(t.error||'unknown error'):'Stopped.';ui.summary.style.color=t.status==='failed'?'var(--danger)':'var(--muted)';ui.summary.style.display='block';}
+  else ui.summary.style.display='none';
+  // Files the task made
+  const outs=t.outputs||[];
+  ui.files.replaceChildren(...outs.map(f=>{
+    const row=mk('div',null,'fileRow'),name=mk('span','📄 '+f.name),dl=mk('button','Download','btn small light');
+    name.appendChild(mk('small',' · '+fmtSize(f.size)));dl.type='button';dl.addEventListener('click',()=>downloadTaskFile(t.id,f.name,dl));row.append(name,dl);return row;
+  }));
+  ui.files.style.display=outs.length?'flex':'none';
+  // Activity log (last 6 lines unless expanded)
+  const lines=taskLogLines(w.events),shown=w.showAll?lines:lines.slice(-6);
+  ui.log.replaceChildren();
+  if(lines.length>shown.length){const more=mk('button','Show all '+lines.length+' steps','more');more.type='button';more.addEventListener('click',()=>{w.showAll=true;drawTask(w);});ui.log.appendChild(more);}
+  shown.forEach(e=>{
+    const icon=e.type==='text'?'💬':e.type==='plan'?'☑':e.type==='question'?'❓':e.type==='reply'?'↩':e.type==='note'?'ℹ':(TASK_ICON[e.status]||'•');
+    const text=icon+' '+e.label+(e.ms?' ('+fmtDur(e.ms)+')':''),cls='ev '+(e.status==='failed'?'failed':e.type==='text'?'text':'');
+    if(e.detail){
+      const d=mk('details',null,cls);d.append(mk('summary',text),mk('pre',e.detail));
+      if(w.open[e.seq])d.open=true;d.addEventListener('toggle',()=>{w.open[e.seq]=d.open;});ui.log.appendChild(d);
+    }else ui.log.appendChild(mk('div',text,cls));
+  });
+  ui.log.style.display=lines.length?'block':'none';
+  // Stop
+  ui.btns.replaceChildren();
+  if(active&&!t.stopRequested){const stop=mk('button','Stop task','btn small ghost');stop.type='button';stop.addEventListener('click',async()=>{stop.disabled=true;try{await tasksCall({action:'stop',taskId:t.id});}catch(e){w.err=cleanErr(e,'Could not stop the task.');}pollTask(w,true);});ui.btns.appendChild(stop);}
+  ui.btns.style.display=ui.btns.children.length?'flex':'none';
+}
+async function downloadTaskFile(taskId,name,btn){
+  const old=btn.textContent;btn.disabled=true;btn.textContent='Downloading…';
+  try{
+    const r=(await tasksCall({action:'file',taskId,name})).data,bin=atob(r.data),bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+    // Always a download (never opened in the app), whatever the file type.
+    const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'})),a=document.createElement('a');
+    a.href=url;a.download=r.name||name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+    btn.textContent=old;
+  }catch(e){btn.textContent='Failed';setTimeout(()=>{btn.textContent=old;},2500);}
+  finally{btn.disabled=false;}
+}
+async function openTasks(){
+  show('tasksWrap');const box=by('taskList');box.textContent='Loading…';by('tasksWorker').textContent='';
+  try{
+    const r=(await tasksCall({action:'list'})).data||{},list=r.tasks||[],wk=r.worker||{};
+    by('tasksWorker').textContent=wk.online?('Laptop online'+(wk.host?' ('+wk.host+')':'')+(wk.docker?' · Docker ready':' · Docker not running')+(wk.busy?' · working':'')):('Laptop offline'+(wk.lastSeen?' · last seen '+new Date(wk.lastSeen).toLocaleString():'')+'. Queued tasks start when it is back.');
+    box.replaceChildren();
+    if(!list.length){box.appendChild(mk('p','No tasks yet. Turn on "⚙ Task" in the chat box and describe a job, for example: "Make an Excel sales summary with a chart from the attached CSV".'));return;}
+    list.forEach(t=>{
+      const row=mk('div',null,'fileRow'),name=mk('span'),open=mk('button','Open','btn small'),del=mk('button','🗑');
+      name.append(mk('span',TASK_LABEL[t.status]||t.status,'pill '+t.status),document.createTextNode(' '+t.title),document.createElement('br'),mk('small',new Date(t.createdAt).toLocaleString()+(t.outputs.length?' · '+t.outputs.length+' file'+(t.outputs.length>1?'s':''):'')));
+      open.type='button';open.addEventListener('click',async()=>{if(t.chatId)await openChat(t.chatId,true);else show('chatWrap');});
+      del.type='button';del.title=TASK_ACTIVE.includes(t.status)?'Stop the task before deleting it':'Delete the task and its files';del.disabled=TASK_ACTIVE.includes(t.status);
+      let armed=0;
+      del.addEventListener('click',async()=>{
+        if(!armed){armed=setTimeout(()=>{armed=0;del.textContent='🗑';},3000);del.textContent='Delete?';return;}
+        clearTimeout(armed);del.disabled=true;
+        try{await tasksCall({action:'delete',taskId:t.id});row.remove();}catch(e){del.disabled=false;del.textContent='🗑';}
+      });
+      row.append(name,open,del);box.appendChild(row);
+    });
+  }catch(e){box.textContent=cleanErr(e,'Could not load your tasks.');}
+}
+by('tasksBtn').addEventListener('click',()=>{if(by('tasksWrap').style.display==='block')show('chatWrap');else openTasks();});
+
 // Return from Google sign-in: remember the result and tidy the address bar.
 let connectorReturn=null;
 try{const u=new URL(location.href);if(u.searchParams.get('connector')==='google'){connectorReturn=u.searchParams.get('status')||'error';history.replaceState(null,'','/');}}catch(e){}
@@ -1445,7 +1692,7 @@ async function render(user){
   }
   const changed=user.uid!==lastUid;lastUid=user.uid;
   by('signOutBtn').textContent=user.isAnonymous?'Exit guest':'Sign out';
-  by('staffBtn').style.display='none';by('staffBtn').textContent='Staff';by('settingsBtn').style.display='none';by('skillsBtn').style.display='none';by('canvasesBtn').style.display='none';
+  by('staffBtn').style.display='none';by('staffBtn').textContent='Staff';by('settingsBtn').style.display='none';by('taskBtn').style.display='none';by('tasksBtn').style.display='none';by('skillsBtn').style.display='none';by('canvasesBtn').style.display='none';
   ME={tier:user.isAnonymous?'guest':'member'};setAllowance(null);
   by('whoLine').textContent=user.isAnonymous?'Guest':(user.displayName||user.email||'');
   if(changed){current=null;chats=[];cv=null;closeCanvas();turns=user.isAnonymous?loadGuestTurns():[];}
@@ -1455,6 +1702,7 @@ async function render(user){
     if(me.tier==='unverified'){show('verifyWrap');return;}
     ME=me;setAllowance(me.remaining);
     if(me.tier==='owner')by('staffBtn').style.display='inline-block';
+    by('taskBtn').style.display=me.tier==='owner'?'':'none';by('tasksBtn').style.display=me.tier==='owner'?'inline-block':'none';if(me.tier!=='owner')setTaskMode(false);
     by('settingsBtn').style.display=saves()?'inline-block':'none';by('tabConnectors').style.display=(me.tier==='owner'||me.tier==='staff')?'inline-block':'none';by('tabModels').style.display=me.tier==='owner'?'inline-block':'none';
     loadModelMenu();
     if(connectorReturn&&saves()){const st=connectorReturn;connectorReturn=null;openSettings('connectors');const msg={connected:'Google connected.','no-access':'Google connected, but no access was granted. Try again and tick the boxes.',cancelled:'Google sign-in was cancelled.',expired:'That sign-in link expired. Please try again.',error:'Google sign-in failed. Please try again.'}[st]||'';setTimeout(()=>{showMsg(st==='connected'?'connInfo':'connErr',msg);},400);}by('skillsBtn').style.display=saves()?'inline-block':'none';by('canvasesBtn').style.display=saves()?'inline-block':'none';mySkills=[];

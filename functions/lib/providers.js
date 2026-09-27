@@ -1,6 +1,6 @@
 "use strict";
 // AI chain for the standalone Accaza AI app (ChatGPT-style, v1.3: memory, tools).
-// Order: Gemini (owner/staff: 3.8 Flash, then Flash-Lite) -> Groq -> Cerebras -> DeepSeek -> Qwen (Ollama on SUPERDAD) -> Ashna.
+// Order: Gemini (owner/staff: 3.8 Flash, then Flash-Lite) -> Groq -> Cerebras -> DeepSeek -> Qwen (Ollama on SUPERDAD) -> Ashna -> JEV Router.
 // Replies stream: each provider pushes text pieces through ctx.onDelta as they arrive. A provider
 // that fails before or during its reply is a provider failure; if it had already streamed some
 // text, the caller is told to reset (the client clears the bubble) and the next provider answers.
@@ -15,6 +15,7 @@ const REQUEST_BUDGET_MS = 110000;
 const FIRST_TEXT_MS = 25000;
 const OLLAMA_FIRST_TEXT_MS = 70000;
 const ASHNA_TIMEOUT_MS = 20000;
+const JEV_TIMEOUT_MS = 30000;
 const MIN_ATTEMPT_MS = 8000;
 // Canvas mode (building pages/apps): long outputs, and a function call with a whole page as its
 // argument only arrives when it is finished, so the first-output wait and total budget are longer.
@@ -31,6 +32,8 @@ const CEREBRAS = {label: "Cerebras", url: "https://api.cerebras.ai/v1/chat/compl
 const DEEPSEEK = {label: "DeepSeek", url: "https://api.deepseek.com/chat/completions", model: "deepseek-flash", maxTokens: 2000, extra: {}};
 const ASHNA = {label: "Ashna", url: "https://api.ashna.ai/v1/api/chat/completions", model: "glm-5.3-flash", maxTokens: 1500, extra: {}};
 const OLLAMA_URL = "https://ollama.accazacoffee.com/api/chat";
+const JEV_ROUTER = {label: "JEV Router", url: "https://openrouter.ai/api/v1/chat/completions", model: "typesafe/jev-router", maxTokens: 4000, extra: {}, tools: true,
+  headers: {"HTTP-Referer": "https://accaza-ai.web.app", "X-OpenRouter-Title": "Accaza AI"}};
 // Base URL for Gemini calls (tests point this at a local server).
 const ENDPOINTS = {gemini: "https://generativelanguage.googleapis.com"};
 
@@ -225,7 +228,8 @@ async function askOpenAiCompatible(provider, key, req, limits, ctx) {
     const body = Object.assign({model: provider.model, messages, temperature: 0.4, max_tokens: req.big ? Math.max(provider.maxTokens, provider.bigTokens || 8000) : provider.maxTokens, stream: true}, provider.extra);
     if (tools) { body.tools = tools; body.tool_choice = final ? "none" : "auto"; }
     const lim = round === 0 ? limits : roundLimits(started, total, req.big ? BIG_FIRST_MS : FIRST_TEXT_MS);
-    await streamLines(provider.label, provider.url, {method: "POST", headers: {"content-type": "application/json", authorization: `Bearer ${key}`}, body: JSON.stringify(body)}, lim,
+    const headers = Object.assign({"content-type": "application/json"}, provider.headers || {}, {authorization: `Bearer ${key}`});
+    await streamLines(provider.label, provider.url, {method: "POST", headers, body: JSON.stringify(body)}, lim,
       async (line, json, markText) => {
         const data = json || sseData(line);
         if (!data) return;
@@ -317,7 +321,7 @@ function noToolsSystem(req) {
 
 // Built-in providers by id (the ids the model menu uses). files = can read attachments,
 // tools = can use web search / skills / connectors.
-const BUILTIN_IDS = ["gemini", "gemini-lite", "groq", "cerebras", "deepseek", "ollama", "ashna"];
+const BUILTIN_IDS = ["gemini", "gemini-lite", "groq", "cerebras", "deepseek", "ollama", "ashna", "jev"];
 function builtinProvider(id, req) {
   const keys = req.keys || {}, key = name => headerValue(keys[name] ? keys[name]() : "");
   const noTools = Object.assign({}, req, {tools: null, system: noToolsSystem(req)});
@@ -330,12 +334,17 @@ function builtinProvider(id, req) {
     case "ollama": return {name: "ollama", model: "qwen3:8b", files: false, tools: false, firstMs: OLLAMA_FIRST_TEXT_MS, enabled: () => Boolean(key("ollamaId") && key("ollamaSecret")), ask: (l, c) => askOllama(key("ollamaId"), key("ollamaSecret"), req, l, c)};
     // Ashna keeps a reserved slice of the budget so a slow Qwen reply cannot use up the last turn.
     case "ashna": return {name: "ashna", model: ASHNA.model, files: false, tools: false, firstMs: ASHNA_TIMEOUT_MS, reserveMs: ASHNA_TIMEOUT_MS, enabled: () => Boolean(key("ashna")), ask: (l, c) => askOpenAiCompatible(Object.assign({}, ASHNA, {tools: false}), key("ashna"), noTools, l, c)};
+    // OpenRouter's hosted JEV Router chooses the downstream model and reasoning effort. This app
+    // retains control of the outer fallback cascade and owner/staff can select JEV manually.
+    case "jev": return {name: "jev", model: JEV_ROUTER.model, files: false, tools: true, firstMs: JEV_TIMEOUT_MS, reserveMs: JEV_TIMEOUT_MS,
+      enabled: () => Boolean(key("openrouter")), ask: (l, c) => askOpenAiCompatible(JEV_ROUTER, key("openrouter"), req, l, c)};
     default: return null;
   }
 }
 
 // req: {question, history, keys, tier, files?, system?, tools?, chosen?}. "Auto" order: Gemini
-// (owner/staff: 3.8 Flash, then Flash-Lite) -> Groq -> Cerebras -> DeepSeek -> Qwen -> Ashna. With
+// (owner/staff: 3.8 Flash, then Flash-Lite) -> Groq -> Cerebras -> DeepSeek -> Qwen -> Ashna ->
+// JEV Router. With
 // files, a second Gemini attempt always follows the first, because only Gemini can read them.
 // req.chosen (a provider object from the model menu) goes first, unless files are attached and
 // it cannot read them; the rest of the Auto chain stays behind it as the fallback.
@@ -346,9 +355,9 @@ function generalChatProviders(req) {
   const auto = [
     Object.assign({}, first, {name: "gemini"}),
     ...(strong || files.length ? [builtinProvider("gemini-lite", req)] : []),
-    ...["groq", "cerebras", "deepseek", "ollama", "ashna"].map(id => builtinProvider(id, req)),
+    ...["groq", "cerebras", "deepseek", "ollama", "ashna", "jev"].map(id => builtinProvider(id, req)),
   ];
-  if (req.big) auto.forEach(p => { if (p.name !== "ollama" && p.name !== "ashna") p.firstMs = BIG_FIRST_MS; });
+  if (req.big) auto.forEach(p => { if (p.name !== "ollama" && p.name !== "ashna" && p.name !== "jev") p.firstMs = BIG_FIRST_MS; });
   const chosen = req.chosen;
   if (chosen && req.big) chosen.firstMs = BIG_FIRST_MS;
   if (chosen && (chosen.files || !files.length)) {
@@ -406,7 +415,7 @@ async function geminiJson(key, model, system, prompt, timeoutMs = 8000, fetchImp
 }
 
 module.exports = {
-  ENDPOINTS, INSTRUCTION, GEMINI, REQUEST_BUDGET_MS, BIG_BUDGET_MS, MIN_ATTEMPT_MS, HISTORY_ENTRIES, HISTORY_CHARS, MAX_TOOL_ROUNDS, MAX_TOOL_CALLS,
+  ENDPOINTS, INSTRUCTION, GEMINI, GROQ, CEREBRAS, DEEPSEEK, REQUEST_BUDGET_MS, BIG_BUDGET_MS, MIN_ATTEMPT_MS, HISTORY_ENTRIES, HISTORY_CHARS, MAX_TOOL_ROUNDS, MAX_TOOL_CALLS,
   cleanText, cleanMultiline, chatHistory, openAiMessages, geminiParts, systemText, providerFailure, finalAnswer, streamLines, sseData, trimToSentence, headerValue,
   BUILTIN_IDS, askGemini, askOpenAiCompatible, askAnthropic, noToolsSystem, builtinProvider, generalChatProviders, withFallback, geminiJson,
 };

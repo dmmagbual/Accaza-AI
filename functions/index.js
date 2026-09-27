@@ -20,10 +20,12 @@ const Google = require("./lib/google");
 const Mcp = require("./lib/mcp");
 const Models = require("./lib/models");
 const Canvas = require("./lib/canvas");
+const Tasks = require("./lib/tasks");
+const {getStorage} = require("firebase-admin/storage");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.8";
+const RELEASE_VERSION = "1.11";
 const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
@@ -33,6 +35,7 @@ const DEEPSEEK_API_KEY = defineSecret("DEEPSEEK_API_KEY");
 const OLLAMA_ACCESS_CLIENT_ID = defineSecret("OLLAMA_ACCESS_CLIENT_ID");
 const OLLAMA_ACCESS_CLIENT_SECRET = defineSecret("OLLAMA_ACCESS_CLIENT_SECRET");
 const ASHNA_API_KEY = defineSecret("ASHNA_API_KEY");
+const OPENROUTER_API_KEY = defineSecret("OPENROUTER_API_KEY");
 // Gemini key from the accaza-ai project itself, used for Google Search grounding.
 const WEB_SEARCH_KEY = defineSecret("WEB_SEARCH_KEY");
 // Connectors: AES key for stored tokens, and the Google OAuth client ("unset" until configured).
@@ -42,10 +45,11 @@ const GOOGLE_OAUTH_CLIENT_SECRET = defineSecret("GOOGLE_OAUTH_CLIENT_SECRET");
 const CONNECTOR_SECRETS = [CONNECTOR_TOKEN_KEY, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET];
 const CONNECTOR_TIERS = ["owner", "staff"];
 function googleConfig() { return {clientId: GOOGLE_OAUTH_CLIENT_ID.value().trim(), clientSecret: GOOGLE_OAUTH_CLIENT_SECRET.value().trim(), tokenKey: CONNECTOR_TOKEN_KEY.value().trim()}; }
-const AI_SECRETS = [GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY];
+const AI_SECRETS = [GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY, OPENROUTER_API_KEY];
 const KEYS = {
   gemini: () => GEMINI_API_KEY.value(), groq: () => GROQ_API_KEY.value(), cerebras: () => CEREBRAS_API_KEY.value(), deepseek: () => DEEPSEEK_API_KEY.value(),
   ollamaId: () => OLLAMA_ACCESS_CLIENT_ID.value(), ollamaSecret: () => OLLAMA_ACCESS_CLIENT_SECRET.value(), ashna: () => ASHNA_API_KEY.value(),
+  openrouter: () => OPENROUTER_API_KEY.value(),
 };
 
 // Only unusual outcomes are written (a backup answered, or nothing answered).
@@ -161,6 +165,24 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 300, memory: "512M
     response.sendChunk({sources}).catch(() => {});
   };
   const web = Web.webTools({db, uid: account.uid, day, unlimited: Access.unlimited(account.tier), keys: {search: AI.headerValue(WEB_SEARCH_KEY.value()), chat: geminiKey}, onSources: addSources, now});
+  // Do not rely solely on a model deciding to call a tool. For clear web/current/entity lookups,
+  // search once on the server and give the evidence to every provider, including no-tool models.
+  const toolsUsed = [];
+  let autoWebContext = "";
+  if (Web.shouldAutoSearch(question)) {
+    const args = {query: question}, label = `Searching the web: ${AI.cleanText(question, 80)}`;
+    toolsUsed.push({name: "web_search", label});
+    await response.sendChunk({tool: {name: "web_search", status: "running", label}}).catch(() => {});
+    let found;
+    try { found = await web.run("web_search", args); }
+    catch (error) {
+      console.warn(JSON.stringify({event: "automatic_web_search_failed", message: String(error && error.message || error).slice(0, 200)}));
+      found = {error: "Web search is unavailable right now."};
+    }
+    const status = found && found.error ? "failed" : "done";
+    await response.sendChunk({tool: {name: "web_search", status, label}}).catch(() => {});
+    autoWebContext = Web.searchContext(question, found);
+  }
   // Connectors (owner/staff): Google Drive/Gmail/Calendar read-only, and MCP servers.
   let connectorTools = [], connectorNote = "";
   if (CONNECTOR_TIERS.includes(account.tier)) {
@@ -184,8 +206,7 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 300, memory: "512M
   const canvasToolSet = big ? Canvas.canvasTools(db, account.uid, canvasState, now, info => { canvasInfo = {id: info.id, title: info.title, kind: info.kind, version: info.version}; response.sendChunk({canvas: info}).catch(() => {}); }) : null;
   const tools = combineTools([canvasToolSet, skills.length ? Skills.skillTools(db, geminiKey, skills) : null, web, ...connectorTools]);
   const today = `Today's date in Manila is ${Access.manilaDay(now)}.`;
-  const system = [today, big ? Canvas.canvasBlock(canvasState.canvas, data.canvasSelection) : "", Web.GUIDE, connectorNote, saves ? Memory.personalBlock(settings, memories) : "", Skills.catalogBlock(skills, pinned)].filter(Boolean).join("\n\n");
-  const toolsUsed = [];
+  const system = [today, big ? Canvas.canvasBlock(canvasState.canvas, data.canvasSelection) : "", Web.GUIDE, autoWebContext, connectorNote, saves ? Memory.personalBlock(settings, memories) : "", Skills.catalogBlock(skills, pinned)].filter(Boolean).join("\n\n");
   let result, picked = null;
   try {
     // Model menu: "auto" keeps the normal chain; a picked model goes first with the chain behind it.
@@ -256,8 +277,8 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
     chats: async () => ({chats: await Chats.listChats(db, actor.uid)}),
     messages: () => Chats.listMessages(db, actor.uid, data.chatId),
     renameChat: () => Chats.renameChat(db, actor.uid, data.chatId, data.title),
-    deleteChat: async () => { const out = await Chats.deleteChat(db, actor.uid, data.chatId); out.filesDeleted = await purgeUploads(db, actor.uid, out.fileIds); delete out.fileIds; return out; },
-    deleteAllChats: async () => { const out = await Chats.deleteAllChats(db, actor.uid); out.filesDeleted = await purgeUploads(db, actor.uid, null); return out; },
+    deleteChat: async () => { const out = await Chats.deleteChat(db, actor.uid, data.chatId); out.filesDeleted = await purgeUploads(db, actor.uid, out.fileIds); delete out.fileIds; out.tasksDeleted = await Tasks.deleteTasks(db, taskBucket(), actor.uid, out.deleted); return out; },
+    deleteAllChats: async () => { const out = await Chats.deleteAllChats(db, actor.uid); out.filesDeleted = await purgeUploads(db, actor.uid, null); out.tasksDeleted = await Tasks.deleteTasks(db, taskBucket(), actor.uid, null); return out; },
     getSettings: async () => ({settings: await Memory.loadSettings(db, actor.uid), memories: await Memory.listMemories(db, actor.uid)}),
     saveSettings: async () => ({settings: await Memory.saveSettings(db, actor.uid, data.settings || {}, now)}),
     addMemory: () => Memory.addMemory(db, actor.uid, data.text, now),
@@ -344,6 +365,26 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
     return {ok: true, uid, role: patch.role, status: patch.status};
   }
   throw new HttpsError("invalid-argument", "Unknown action.");
+});
+
+// Laptop tasks (owner only): long, multi-step jobs that the worker on the owner's laptop runs in a
+// Docker sandbox (code, files, web research). This callable only queues, reports and controls
+// them; see lib/tasks.js and worker/.
+function taskBucket() { return getStorage().bucket(Tasks.BUCKET); }
+exports.tasks = onCall({enforceAppCheck: true, timeoutSeconds: 120, memory: "512MiB"}, async request => {
+  const db = getFirestore(), actor = await Access.resolveAccount(db, request.auth), data = request.data || {}, action = AI.cleanText(data.action, 20), now = Date.now();
+  if (actor.tier !== "owner") throw new HttpsError("permission-denied", "Tasks run on the owner's laptop and are available to the owner only.");
+  switch (action) {
+    case "create": return Tasks.createTask({db, bucket: taskBucket(), account: actor, data, now, Chats});
+    case "list": return Tasks.listTasks(db, actor.uid, now);
+    case "get": return Tasks.getTask(db, actor.uid, data.taskId, data.since, now);
+    case "stop": return Tasks.stopTask(db, actor.uid, data.taskId, now);
+    case "reply": return Tasks.replyTask(db, actor.uid, data.taskId, data.text, now);
+    case "file": return Tasks.downloadFile(db, taskBucket(), actor.uid, data.taskId, data.which === "inputs" ? "inputs" : "outputs", data.name);
+    case "delete": return Tasks.deleteTask(db, taskBucket(), actor.uid, data.taskId);
+    case "worker": return {worker: await Tasks.workerStatus(db, now)};
+    default: throw new HttpsError("invalid-argument", "Unknown action.");
+  }
 });
 
 // Google OAuth redirect (https://accaza-ai.web.app/oauth/google, via a Hosting rewrite).

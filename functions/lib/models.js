@@ -18,6 +18,7 @@ const BUILTINS = [
   {id: "deepseek", label: "DeepSeek", note: "Good at reasoning", files: false, tools: true, tiers: ["owner", "staff", "member", "guest"]},
   {id: "ollama", label: "Qwen 3 (Accaza PC)", note: "Private · slow · PC must be on", files: false, tools: false, tiers: ["owner", "staff"]},
   {id: "ashna", label: "Ashna · GLM", note: "Last-resort backup", files: false, tools: false, tiers: ["owner", "staff"]},
+  {id: "jev", label: "JEV Router · OpenRouter", note: "Smart routing · final Auto backup", files: false, tools: true, tiers: ["owner", "staff"]},
 ];
 const PROVIDERS = {
   openai: {label: "OpenAI", format: "openai", baseUrl: "https://api.openai.com/v1"},

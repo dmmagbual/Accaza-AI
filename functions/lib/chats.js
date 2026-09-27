@@ -39,6 +39,7 @@ function planTurn(messages, mode, question) {
   const last = messages[messages.length - 1], before = messages[messages.length - 2];
   if (mode === "regenerate" || mode === "edit") {
     if (!last || last.role !== "model" || !before || before.role !== "user") throw new HttpsError("failed-precondition", "There is no answer to redo in this chat.");
+    if (last.task || before.task) throw new HttpsError("failed-precondition", "A task can't be regenerated or edited. Start a new task instead.");
     if (mode === "regenerate") return {question: before.text, history: messages.slice(0, -2), remove: [last], keepUser: before, attachments: before.attachments || []};
     return {question, history: messages.slice(0, -2), remove: [before, last], keepUser: null, attachments: before.attachments || []};
   }
@@ -75,7 +76,7 @@ async function listChats(db, uid) {
 async function listMessages(db, uid, chatId) {
   const {ref, data} = await requireChat(db, uid, chatId);
   const snap = await ref.collection("messages").orderBy("at", "desc").limit(LIST_MESSAGES).get();
-  return {chat: {id: ref.id, title: data.title || "New chat"}, messages: snap.docs.map(doc => { const m = doc.data(); return {id: doc.id, role: m.role, text: m.text || "", at: m.at || 0, attachments: (m.attachments || []).map(f => ({id: f.id, displayName: f.displayName, mimeType: f.mimeType, expiresAt: f.expiresAt})), sources: m.sources || [], canvas: m.canvas || null}; }).reverse()};
+  return {chat: {id: ref.id, title: data.title || "New chat"}, messages: snap.docs.map(doc => { const m = doc.data(); return {id: doc.id, role: m.role, text: m.text || "", at: m.at || 0, attachments: (m.attachments || []).map(f => ({id: f.id, displayName: f.displayName, mimeType: f.mimeType, expiresAt: f.expiresAt})), sources: m.sources || [], canvas: m.canvas || null, task: m.task || null, taskFiles: m.taskFiles || []}; }).reverse()};
 }
 async function renameChat(db, uid, chatId, title) {
   const {ref} = await requireChat(db, uid, chatId);
