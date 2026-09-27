@@ -25,7 +25,7 @@ const {getStorage} = require("firebase-admin/storage");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.11";
+const RELEASE_VERSION = "1.12";
 const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
@@ -43,7 +43,7 @@ const CONNECTOR_TOKEN_KEY = defineSecret("CONNECTOR_TOKEN_KEY");
 const GOOGLE_OAUTH_CLIENT_ID = defineSecret("GOOGLE_OAUTH_CLIENT_ID");
 const GOOGLE_OAUTH_CLIENT_SECRET = defineSecret("GOOGLE_OAUTH_CLIENT_SECRET");
 const CONNECTOR_SECRETS = [CONNECTOR_TOKEN_KEY, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET];
-const CONNECTOR_TIERS = ["owner", "staff"];
+const CONNECTOR_TIERS = ["owner"];
 function googleConfig() { return {clientId: GOOGLE_OAUTH_CLIENT_ID.value().trim(), clientSecret: GOOGLE_OAUTH_CLIENT_SECRET.value().trim(), tokenKey: CONNECTOR_TOKEN_KEY.value().trim()}; }
 const AI_SECRETS = [GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY, OPENROUTER_API_KEY];
 const KEYS = {
@@ -183,7 +183,7 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 300, memory: "512M
     await response.sendChunk({tool: {name: "web_search", status, label}}).catch(() => {});
     autoWebContext = Web.searchContext(question, found);
   }
-  // Connectors (owner/staff): Google Drive/Gmail/Calendar read-only, and MCP servers.
+  // Connectors are owner-only. Full usage access never implies access to external accounts.
   let connectorTools = [], connectorNote = "";
   if (CONNECTOR_TIERS.includes(account.tier)) {
     try {
@@ -246,7 +246,7 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 300, memory: "512M
 });
 
 // Account actions. "me" registers the caller on first use and reports their tier and today's
-// allowance. The owner can list accounts and approve or remove staff.
+// allowance. The owner can list accounts and grant full or limited usage access.
 exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "256MiB", secrets: [GEMINI_API_KEY, ...CONNECTOR_SECRETS]}, async request => {
   const db = getFirestore(), auth = request.auth, data = request.data || {}, action = AI.cleanText(data.action, 20), now = Date.now(), day = Access.manilaDay(now);
   if (!auth || !auth.uid) throw new HttpsError("unauthenticated", "Sign in first.");
@@ -258,18 +258,19 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
     const email = Access.normalEmail(auth.token && auth.token.email), verified = auth.token && auth.token.email_verified === true;
     const ref = db.collection("users").doc(auth.uid), snap = await ref.get(), user = snap.exists ? snap.data() : null;
     const owner = verified && Access.isOwnerEmail(email), name = Access.cleanName(data.name) || (user && user.name) || Access.cleanName(auth.token.name) || "";
-    if (!user) await ref.set({email, name, role: owner ? "owner" : "member", status: owner ? "approved" : "pending", createdAt: now, updatedAt: now});
+    if (!user) await ref.set({email, name, role: owner ? "owner" : "member", accessLevel: owner ? "full" : "limited", status: owner ? "approved" : "limited", createdAt: now, updatedAt: now});
     else {
       const patch = {email, updatedAt: now, lastSeenAt: now};
       if (Access.cleanName(data.name)) patch.name = name;
-      if (owner && user.role !== "owner") Object.assign(patch, {role: "owner", status: "approved"});
+      if (owner && (user.role !== "owner" || user.accessLevel !== "full")) Object.assign(patch, {role: "owner", accessLevel: "full", status: "approved"});
+      else if (!owner && !["full", "limited"].includes(user.accessLevel)) patch.accessLevel = Access.userAccessLevel(user);
       await ref.set(patch, {merge: true});
     }
     if (!verified) return {tier: "unverified", emailVerified: false, email, name};
     const account = await Access.resolveAccount(db, auth);
     if (Access.unlimited(account.tier)) return {tier: account.tier, emailVerified: true, email, name, limit: null, remaining: null, model: AI.GEMINI.strong.model};
     const used = await Access.usedToday(db, auth.uid, day);
-    return {tier: account.tier, emailVerified: true, email, name, limit: Access.DAILY_LIMIT, remaining: Math.max(0, Access.DAILY_LIMIT - used), pendingApproval: true};
+    return {tier: account.tier, emailVerified: true, email, name, limit: Access.DAILY_LIMIT, remaining: Math.max(0, Access.DAILY_LIMIT - used)};
   }
   const actor = await Access.resolveAccount(db, auth);
   // Saved chats: any registered, verified account, always scoped to the caller's own uid.
@@ -285,7 +286,7 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
     deleteMemory: () => Memory.deleteMemory(db, actor.uid, data.memoryId),
     deleteAllMemories: () => Memory.deleteAllMemories(db, actor.uid),
   };
-  // Connectors: owner and staff only.
+  // Connectors: owner only. Usage access and sensitive external-account access stay separate.
   const connectorActions = {
     connectors: async () => {
       const cfg = googleConfig(), docs = (await db.collection("users").doc(actor.uid).collection("connectors").get()).docs.map(doc => Object.assign({id: doc.id}, doc.data()));
@@ -310,7 +311,7 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
     return modelActions[action]();
   }
   if (connectorActions[action]) {
-    if (!CONNECTOR_TIERS.includes(actor.tier)) throw new HttpsError("permission-denied", "Connectors are available to the owner and approved staff.");
+    if (!CONNECTOR_TIERS.includes(actor.tier)) throw new HttpsError("permission-denied", "Connectors are available only to the owner.");
     return connectorActions[action]();
   }
   // Canvas and published sites.
@@ -326,10 +327,10 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
     canvasRestore: async () => { const c = await Canvas.getCanvas(db, actor.uid, data.canvasId); const v = await c.ref.collection("versions").doc(String(Number(data.version))).get(); if (!v.exists) throw new HttpsError("not-found", "That version is no longer kept."); return {version: await Canvas.saveVersion(db, c, v.data().code, "user", `Restored version ${Number(data.version)}`, now)}; },
     canvasRename: async () => { const c = await Canvas.getCanvas(db, actor.uid, data.canvasId); const title = String(data.title || "").replace(/\s+/g, " ").trim().slice(0, 80); if (!title) throw new HttpsError("invalid-argument", "Type a title."); await c.ref.set({title, updatedAt: now}, {merge: true}); return {title}; },
     canvasDelete: async () => { const c = await Canvas.getCanvas(db, actor.uid, data.canvasId); if (c.data.published) await Canvas.unpublish(db, actor.uid, c.id); await db.recursiveDelete(c.ref); return {deleted: c.id}; },
-    sitePublish: async () => { if (!Canvas.PUBLISH_TIERS.includes(actor.tier)) throw new HttpsError("permission-denied", "Publishing is available to the owner and approved staff."); return Canvas.publish(db, actor.uid, data.canvasId, data.slug, now); },
+    sitePublish: async () => { if (!Canvas.PUBLISH_TIERS.includes(actor.tier)) throw new HttpsError("permission-denied", "Publishing is available only to the owner."); return Canvas.publish(db, actor.uid, data.canvasId, data.slug, now); },
     siteUnpublish: async () => Canvas.unpublish(db, actor.uid, data.canvasId),
     siteImage: async () => {
-      if (!Canvas.PUBLISH_TIERS.includes(actor.tier)) throw new HttpsError("permission-denied", "Site images are available to the owner and approved staff.");
+      if (!Canvas.PUBLISH_TIERS.includes(actor.tier)) throw new HttpsError("permission-denied", "Site images are available only to the owner.");
       const file = Files.validateUpload(data);
       if (!/^image\//.test(file.mimeType)) throw new HttpsError("invalid-argument", "Only photos can be added to sites.");
       if (file.bytes.length > 950 * 1024) throw new HttpsError("invalid-argument", "That photo is too large for a site (max about 900 KB after shrinking).");
@@ -344,25 +345,30 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
     if (actor.tier === "guest") throw new HttpsError("failed-precondition", "Sign in to save chats and use memory.");
     return chatActions[action]();
   }
-  if (actor.tier !== "owner") throw new HttpsError("permission-denied", "Only the owner can manage staff.");
+  if (actor.tier !== "owner") throw new HttpsError("permission-denied", "Only the owner can manage account access.");
   if (action === "list") {
     const [usersSnap, usageSnap, healthSnap] = await Promise.all([db.collection("users").orderBy("createdAt", "desc").limit(200).get(), db.collection("usage").doc(day).get(), db.collection("providerHealth").doc(day).get()]);
     const usage = usageSnap.exists ? usageSnap.data() : {}, health = healthSnap.exists ? healthSnap.data() : {};
     return {
-      users: usersSnap.docs.map(doc => { const u = doc.data(); return {uid: doc.id, email: u.email || "", name: u.name || "", role: u.role || "member", status: u.status || "pending", createdAt: u.createdAt || 0, lastSeenAt: u.lastSeenAt || 0}; }),
+      users: usersSnap.docs.map(doc => { const u = doc.data(); return {uid: doc.id, email: u.email || "", name: u.name || "", role: u.role || "member", accessLevel: u.role === "owner" ? "owner" : Access.userAccessLevel(u), createdAt: u.createdAt || 0, lastSeenAt: u.lastSeenAt || 0}; }),
       today: {day, limitedMessages: Number(usage.total || 0), sharedLimit: Access.SHARED_DAILY_LIMIT, backupAnswers: health.backupAnswers || {}, providerFailures: health.providerFailures || {}, failedQuestions: Number(health.failedQuestions || 0)},
     };
   }
-  if (action === "approve" || action === "remove") {
+  if (["grantFull", "setLimited", "approve", "remove"].includes(action)) {
     const uid = AI.cleanText(data.uid, 128);
     if (!uid || uid === actor.uid) throw new HttpsError("invalid-argument", "Choose another account.");
     const ref = db.collection("users").doc(uid), snap = await ref.get();
     if (!snap.exists) throw new HttpsError("not-found", "That account was not found.");
     if (snap.data().role === "owner") throw new HttpsError("failed-precondition", "The owner account cannot be changed here.");
-    const patch = action === "approve" ? {role: "staff", status: "approved", approvedAt: now, approvedBy: actor.uid} : {role: "member", status: "removed", removedAt: now, removedBy: actor.uid};
+    const full = action === "grantFull" || action === "approve";
+    // Keep legacy role/status fields during the transition so any older deployed revision reads
+    // the same entitlement. accessLevel is the new source of truth.
+    const patch = full
+      ? {accessLevel: "full", role: "staff", status: "approved", accessChangedAt: now, accessChangedBy: actor.uid, approvedAt: now, approvedBy: actor.uid}
+      : {accessLevel: "limited", role: "member", status: "limited", accessChangedAt: now, accessChangedBy: actor.uid};
     await ref.set(Object.assign(patch, {updatedAt: now}), {merge: true});
-    await db.collection("adminLog").add({at: now, action, uid, by: actor.uid, email: snap.data().email || ""});
-    return {ok: true, uid, role: patch.role, status: patch.status};
+    await db.collection("adminLog").add({at: now, action: full ? "grant_full_access" : "set_limited_access", uid, by: actor.uid, email: snap.data().email || ""});
+    return {ok: true, uid, accessLevel: patch.accessLevel};
   }
   throw new HttpsError("invalid-argument", "Unknown action.");
 });

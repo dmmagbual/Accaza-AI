@@ -14,7 +14,7 @@ Live at **https://accaza-ai.web.app**.
   - The server checks each file's real type from its first bytes and stores it in the Gemini Files API, which Google deletes after 48 hours. The record lives in `uploads/{id}` with the owner's uid (Firestore TTL on `expireAt`).
   - A message can only use its own account's files.
   - Only Gemini can read files. When a file is attached, Gemini gets a second try, and then the text-only backups are told a file exists.
-  - Daily upload cap: 20 for members/guests, 100 for owner/staff.
+  - Daily upload cap: 20 for limited users/guests, 100 for owner/full-access users.
   - Deleting a chat, or all chats, also deletes its files.
 - **Memory** (registered users):
   - Settings → Personalise has "About you" and "How should Accaza AI reply?", plus switches for Use memory and Learn from chats.
@@ -26,13 +26,13 @@ Live at **https://accaza-ai.web.app**.
   - Claude-style skill **.zip** or **SKILL.md** files can be imported. Front matter gives the name and description, and scripts are skipped.
   - Files are read once (PDFs through Gemini), chunked and embedded with `gemini-embedding-001` (768-d), and searched with Firestore vector search.
   - In chat, the AI sees the skill catalogue and calls `read_skill` / `search_skill` tools. Typing **/** pins a skill for the message.
-  - The owner can share a skill with everyone. Members can create up to 5 skills; staff 50.
+  - The owner can share a skill with everyone. Limited users can create up to 5 skills; full-access users 50.
 - **Web search and links** (everyone):
   - Every model can use web results. Tool-capable models call `web_search`; for explicit web/current requests and named-entity lookup questions, the server searches first and supplies the result even to providers without a tool loop. Search uses Gemini Google Search grounding with the `WEB_SEARCH_KEY` secret, then the chat key, then Wikipedia's free API as a last resort.
   - `open_url` reads a link. It's SSRF-guarded: no private addresses, and every redirect is re-checked.
   - Sources show under the answer and are saved with the chat.
-  - Daily caps: 5 searches per member/guest, 60 per owner/staff, 150 in total, to stay inside the 5,000-a-month free allowance.
-- **Connectors** (owner and approved staff), under Settings → Connectors:
+  - Daily caps: 5 searches per limited user/guest, 60 per owner/full-access user, 150 in total, to stay inside the 5,000-a-month free allowance.
+- **Connectors** (owner only), under Settings → Connectors:
   - **Google Drive, Gmail and Calendar, read-only.**
     - Sign-in uses OAuth with PKCE. The refresh token is stored AES-256-GCM encrypted with the `CONNECTOR_TOKEN_KEY` secret.
     - Tools: `drive_search`, `drive_read`, `gmail_search`, `gmail_read`, `calendar_events`.
@@ -42,28 +42,32 @@ Live at **https://accaza-ai.web.app**.
     - SSRF-guarded.
   - Content from connected apps is treated as data, never as instructions.
 - **Model menu** next to the message box. **Auto** is the normal chain, or pick a model:
-  - Owner/staff can pick any built-in model. Members and guests can pick Flash-Lite, Groq, Cerebras or DeepSeek.
+  - Owner/full-access users can pick any built-in model. Limited users and guests can pick Flash-Lite, Groq, Cerebras or DeepSeek.
   - The picked model goes first, with the Auto chain behind it. A note appears when a backup answered, or when the picked model can't read an attached file.
   - The choice is remembered per chat.
 - **Owner-added models** (Settings → Models):
   - Supported: any OpenAI-compatible provider (OpenAI, OpenRouter, Mistral, xAI, Together, Fireworks, Groq, DeepSeek, Cerebras, or a custom https address), Anthropic (Claude) and Google Gemini.
   - Each added model is tested before it's saved. The key is stored AES-256-GCM encrypted in `models/{id}`.
-  - Each has an audience (only me / staff / everyone) and an optional daily cap (`modelUsage/{day}`).
-- **Saved chats** in a sidebar for registered users (owner, staff, members), with rename, delete and delete all. Guests' chats stay in their browser tab only.
+  - Each has an audience (only me / full access / everyone) and an optional daily cap (`modelUsage/{day}`).
+- **Saved chats** in a sidebar for all registered users, with rename, delete and delete all. Guests' chats stay in their browser tab only.
+- **Account access** (owner only), under Settings → Access:
+  - Every verified registration starts with limited access.
+  - The owner can grant full access or return an account to limited access; changes are audit logged.
+  - Full access controls chat allowance and model availability only. Connectors, publishing and administration remain owner-only.
 - Models:
-  - Owner and staff start on **Gemini 3.8 Flash**, then **Flash-Lite**.
-  - Members and guests start on **Flash-Lite**.
-  - Then everyone falls back through Groq → Cerebras → DeepSeek → Qwen (Ollama on SUPERDAD) → Ashna → JEV Router (`typesafe/jev-router` on OpenRouter). Owner/staff can also select JEV directly from the model menu. If one AI fails or times out, the next one answers. If it fails part-way through a reply, the partial reply is cleared and the next one starts over.
+  - Owner and full-access users start on **Gemini 3.8 Flash**, then **Flash-Lite**.
+  - Limited users and guests start on **Flash-Lite**.
+  - Then everyone falls back through Groq → Cerebras → DeepSeek → Qwen (Ollama on SUPERDAD) → Ashna → JEV Router (`typesafe/jev-router` on OpenRouter). Full-access users can also select JEV directly from the model menu. If one AI fails or times out, the next one answers. If it fails part-way through a reply, the partial reply is cleared and the next one starts over.
 - Who can chat:
 
   | Who | How they get in | Daily limit |
   |---|---|---|
-  | Owner | Registers with an owner email (`functions/lib/access.js`), verified | Unlimited, approves staff |
-  | Staff | Registers, verifies email, owner approves | Unlimited |
-  | Member | Registers and verifies email | 10 a day |
+  | Owner | Registers with an owner email (`functions/lib/access.js`), verified | Unlimited; manages access |
+  | Full access | Registers, verifies email, owner grants full access | Unlimited |
+  | Limited access | Registers and verifies email | 10 a day |
   | Guest | "Continue as guest" | 10 a day |
 
-  Members and guests also share a ceiling of 100 messages a day in total.
+  Limited users and guests also share a ceiling of 100 messages a day in total.
 
 ## Laptop tasks (owner only)
 
@@ -86,7 +90,7 @@ Cowork-style tasks run on the owner's laptop (SUPERDAD), not in Cloud Functions.
   - Select code and use "Ask" for a change to just that part. Quick actions: improve design, mobile-friendly, fix bugs, add comments.
   - Errors in the preview are shown with a "Fix this" button.
   - The **Canvases** button lists every canvas and its site.
-- **Publish** (owner and approved staff): the page goes live at `https://accaza-sites.web.app/<name>`.
+- **Publish** (owner only): the page goes live at `https://accaza-sites.web.app/<name>`.
   - Sites are served from a separate origin with a strict Content-Security-Policy: no requests out (`connect-src 'none'`), no form posts. So sites cannot collect data or payments, and cannot reach the app.
   - "Add a photo" shrinks the photo (about 1600px JPEG, 900 KB max) and hosts it at `/a/<id>` on the sites origin.
   - Publishing is a snapshot. After more edits, tap **Update site**. Unpublish takes it offline; deleting a canvas also unpublishes it.
@@ -114,7 +118,7 @@ Cowork-style tasks run on the owner's laptop (SUPERDAD), not in Cloud Functions.
 
 ## Data (Firestore, asia-southeast1)
 
-- `users/{uid}`: email, name, role (owner/staff/member), status, approval stamps.
+- `users/{uid}`: email, name, `accessLevel` (`full`/`limited`), legacy compatibility fields, and access-change audit stamps.
 - `users/{uid}/chats/{chatId}` and `.../messages/{id}`: saved chats. Only the server reads or writes them, always under the caller's own uid.
 - `users/{uid}/settings/profile` and `users/{uid}/memories/{id}`: personalisation and memory.
 - `skills/{id}` and `skills/{id}/chunks/{id}` (vector index on `embedding`, defined in `firestore.indexes.json`): skills.
@@ -125,10 +129,10 @@ Cowork-style tasks run on the owner's laptop (SUPERDAD), not in Cloud Functions.
 - `tasks/{id}` (owner's uid, status, plan, question, outputs…) and `tasks/{id}/events/{seq}`: laptop tasks and their activity. `workers/{id}`: laptop heartbeat. `taskLog/{id}`: one row per finished task (status, steps, time, error).
 - Cloud Storage `gs://accaza-ai-task-files/tasks/{id}/inputs|outputs/`: task files, deleted after 90 days.
 - `sites/{slug}` and `siteAssets/{id}`: published pages (built HTML) and site photos.
-- `usage/{day}`: per-person and total message counts for members and guests (Manila day).
+- `usage/{day}`: per-person and total message counts for limited users and guests (Manila day).
 - `chatLog/{id}`: analytics (who asked, which AI answered, and a SHA-256 hash of the question). The question text is not stored here.
 - `providerHealth/{day}`: backup answers and provider failures.
-- `adminLog/{id}`: staff approvals and removals.
+- `adminLog/{id}`: full/limited access changes.
 
 ## AI keys
 

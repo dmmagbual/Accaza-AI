@@ -3,6 +3,7 @@
 // Run with `npm test` (needs functions/node_modules: `cd functions && npm install`).
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const AI = require("../functions/lib/providers");
 const Access = require("../functions/lib/access");
 
@@ -10,14 +11,14 @@ const provider = (name, ask, extra = {}) => Object.assign({name, enabled: () => 
 const ok = text => () => Promise.resolve(text);
 const failure = message => () => Promise.reject(AI.providerFailure(message));
 
-test("chain order: staff get 3.8 Flash then Flash-Lite; others start on Flash-Lite", () => {
+test("chain order: full access gets 3.8 Flash then Flash-Lite; limited access starts on Flash-Lite", () => {
   const P = tier => AI.generalChatProviders({question: "hi", history: [], keys: {}, tier});
-  const staff = P("staff"), guest = P("guest");
-  assert.equal(staff.map(p => p.name).join(">"), "gemini>gemini-lite>groq>cerebras>deepseek>ollama>ashna>jev");
-  assert.equal(staff[0].model, "gemini-3.8-flash");
+  const full = P("full"), guest = P("guest");
+  assert.equal(full.map(p => p.name).join(">"), "gemini>gemini-lite>groq>cerebras>deepseek>ollama>ashna>jev");
+  assert.equal(full[0].model, "gemini-3.8-flash");
   assert.equal(guest.map(p => p.name).join(">"), "gemini>groq>cerebras>deepseek>ollama>ashna>jev");
   assert.equal(guest[0].model, "gemini-3.5-flash-lite");
-  assert.equal(P("member")[0].model, "gemini-3.5-flash-lite");
+  assert.equal(P("limited")[0].model, "gemini-3.5-flash-lite");
 });
 test("a normal first answer records nothing", async () => {
   let calls = 0;
@@ -147,16 +148,27 @@ function fakeDb(users = {}) {
 }
 const token = (extra) => Object.assign({firebase: {sign_in_provider: "password"}, email_verified: true}, extra);
 
-test("tiers: guest, unverified, owner, member, approved staff", async () => {
-  const db = fakeDb({s1: {role: "staff", status: "approved"}, r1: {role: "member", status: "removed"}});
+test("access tiers preserve legacy approvals and prefer the new access level", async () => {
+  const db = fakeDb({s1: {role: "staff", status: "approved"}, f1: {accessLevel: "full", role: "member"}, r1: {accessLevel: "limited", role: "staff", status: "approved"}});
   assert.equal((await Access.resolveAccount(db, {uid: "g", token: {firebase: {sign_in_provider: "anonymous"}}})).tier, "guest");
   await assert.rejects(Access.resolveAccount(db, {uid: "u", token: token({email: "a@b.c", email_verified: false})}), e => e.code === "failed-precondition");
   assert.equal((await Access.resolveAccount(db, {uid: "o", token: token({email: "DaniloMagbual@gmail.com"})})).tier, "owner");
   await assert.rejects(Access.resolveAccount(db, {uid: "o2", token: token({email: "danilomagbual@gmail.com", email_verified: false})}), e => e.code === "failed-precondition");
-  assert.equal((await Access.resolveAccount(db, {uid: "m", token: token({email: "m@x.com"})})).tier, "member");
-  assert.equal((await Access.resolveAccount(db, {uid: "s1", token: token({email: "s@x.com"})})).tier, "staff");
-  assert.equal((await Access.resolveAccount(db, {uid: "r1", token: token({email: "r@x.com"})})).tier, "member");
+  assert.equal((await Access.resolveAccount(db, {uid: "m", token: token({email: "m@x.com"})})).tier, "limited");
+  assert.equal((await Access.resolveAccount(db, {uid: "s1", token: token({email: "s@x.com"})})).tier, "full");
+  assert.equal((await Access.resolveAccount(db, {uid: "f1", token: token({email: "f@x.com"})})).tier, "full");
+  assert.equal((await Access.resolveAccount(db, {uid: "r1", token: token({email: "r@x.com"})})).tier, "limited");
+  assert.equal(Access.unlimited("full"), true); assert.equal(Access.unlimited("limited"), false);
   await assert.rejects(Access.resolveAccount(db, null), e => e.code === "unauthenticated");
+});
+test("account access lives in Settings and the normal composer has no visible prompt", () => {
+  const html = fs.readFileSync(require.resolve("../public/index.html"), "utf8");
+  assert.match(html, /id="tabAccess"/); assert.match(html, /id="paneAccess"/);
+  assert.doesNotMatch(html, /id="staffBtn"|id="staffWrap"/);
+  assert.match(html, /id="question"[^>]*placeholder=""[^>]*aria-label="Message Accaza AI"/);
+  assert.match(html, /id="whoLine">© 2026 Accaza AI/);
+  assert.doesNotMatch(html, /whoLine'\)\.textContent=.*user\.email/);
+  assert.match(html, /Grant full access/); assert.match(html, /Return to limited access/);
 });
 test("10 messages per person per day, then a clear limit message", async () => {
   const db = fakeDb();
@@ -509,27 +521,27 @@ test("the model menu depends on the tier and includes shared added models", asyn
   assert.ok(owner.includes("gemini") && owner.includes("ollama") && owner.includes("jev") && owner.includes("custom:b2"));
   assert.equal(guest.includes("jev"), false);
 });
-test("members cannot pick staff-only models; an added model respects its daily cap", async () => {
+test("limited access cannot pick full-access models; an added model respects its daily cap", async () => {
   const db = modelsDb({"models/a1": {label: "GPT", provider: "openai", format: "openai", baseUrl: "https://api.openai.com/v1", model: "gpt-x", audience: "everyone", dailyCap: 1, enabled: true, keyEnc: Crypto.encrypt("sk-1", KEY)}});
-  await assert.rejects(Models.resolvePick(db, "gemini", "member", {}, KEY, "d", 1), e => e.code === "permission-denied");
-  await assert.rejects(Models.resolvePick(db, "jev", "member", {}, KEY, "d", 1), e => e.code === "permission-denied");
-  assert.equal(await Models.resolvePick(db, "auto", "member", {}, KEY, "d", 1), null);
-  const first = await Models.resolvePick(db, "custom:a1", "member", {}, KEY, "d", 1);
+  await assert.rejects(Models.resolvePick(db, "gemini", "limited", {}, KEY, "d", 1), e => e.code === "permission-denied");
+  await assert.rejects(Models.resolvePick(db, "jev", "limited", {}, KEY, "d", 1), e => e.code === "permission-denied");
+  assert.equal(await Models.resolvePick(db, "auto", "limited", {}, KEY, "d", 1), null);
+  const first = await Models.resolvePick(db, "custom:a1", "limited", {}, KEY, "d", 1);
   assert.equal(first.provider.name, "custom:a1");
-  await assert.rejects(Models.resolvePick(db, "custom:a1", "member", {}, KEY, "d", 2), e => e.code === "resource-exhausted");
+  await assert.rejects(Models.resolvePick(db, "custom:a1", "limited", {}, KEY, "d", 2), e => e.code === "resource-exhausted");
 });
 test("an added model is tested before saving, and its key is stored encrypted", async () => {
   const db = modelsDb();
   await assert.rejects(Models.saveModel(db, {provider: "openai", model: "gpt-x", apiKey: "sk-bad"}, KEY, "u", 1, async () => ({ok: false, error: "401 invalid key"}), async () => [{address: "104.18.1.1"}]), /Test failed: 401/);
   assert.equal(Object.keys(db.store).length, 0);
-  const saved = await Models.saveModel(db, {provider: "openai", model: "gpt-x", apiKey: "sk-good", audience: "staff", dailyCap: 50}, KEY, "u", 1, async () => ({ok: true, reply: "OK"}), async () => [{address: "104.18.1.1"}]);
+  const saved = await Models.saveModel(db, {provider: "openai", model: "gpt-x", apiKey: "sk-good", audience: "full", dailyCap: 50}, KEY, "u", 1, async () => ({ok: true, reply: "OK"}), async () => [{address: "104.18.1.1"}]);
   const doc = db.store["models/" + saved.id];
   assert.doesNotMatch(JSON.stringify(doc), /sk-good/); assert.equal(Crypto.decrypt(doc.keyEnc, KEY), "sk-good");
-  assert.equal(doc.baseUrl, "https://api.openai.com/v1"); assert.equal(doc.audience, "staff");
+  assert.equal(doc.baseUrl, "https://api.openai.com/v1"); assert.equal(doc.audience, "full");
   await assert.rejects(Models.saveModel(db, {provider: "custom", baseUrl: "http://10.0.0.5/v1", model: "m", apiKey: "k"}, KEY, "u", 1, async () => ({ok: true})), /https/);
 });
 test("a picked model goes first; the Auto chain stays behind it without duplicates", () => {
-  const req = {question: "q", history: [], keys: {}, tier: "member"};
+  const req = {question: "q", history: [], keys: {}, tier: "limited"};
   req.chosen = AI.builtinProvider("groq", req);
   assert.equal(AI.generalChatProviders(req).map(p => p.name).join(">"), "groq>gemini>cerebras>deepseek>ollama>ashna>jev");
   req.chosen = AI.builtinProvider("gemini-lite", req);

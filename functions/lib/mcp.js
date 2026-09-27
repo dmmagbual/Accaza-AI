@@ -1,6 +1,6 @@
 "use strict";
 // MCP connectors (Model Context Protocol, Streamable HTTP transport): the same open standard
-// Claude and ChatGPT use for connectors. Owner/staff can add a remote MCP server by URL, with an
+// Claude and ChatGPT use for connectors. The owner can add a remote MCP server by URL, with an
 // optional access token (stored encrypted). Tools are listed once when added (and on refresh).
 // Safety: only tools the server marks read-only are offered unless the connector was added with
 // "allow actions that change things"; every URL goes through the SSRF guard; results are data.

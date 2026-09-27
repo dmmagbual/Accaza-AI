@@ -15,7 +15,7 @@ const EMBED_MODEL = "gemini-embedding-001";
 const EMBED_DIMS = 768;
 const EXTRACT_MODEL = "gemini-3.5-flash-lite";
 const LIMITS = {
-  skills: {member: 5, staff: 50, owner: 100},
+  skills: {limited: 5, full: 50, owner: 100},
   filesPerSkill: 20,
   textPerSkill: 400000,
   instructions: 20000,
@@ -139,7 +139,7 @@ async function saveSkill(db, actor, data, now) {
     return {id: skill.id};
   }
   const count = (await db.collection("skills").where("ownerUid", "==", actor.uid).limit(200).get()).size;
-  const cap = LIMITS.skills[actor.tier] || LIMITS.skills.member;
+  const cap = LIMITS.skills[actor.tier] || LIMITS.skills.limited;
   if (count >= cap) throw new HttpsError("resource-exhausted", `You can have up to ${cap} skills.`);
   const ref = db.collection("skills").doc();
   await ref.set({ownerUid: actor.uid, ownerName: actor.name || "", name, description, instructions, shared, files: [], chunkCount: 0, createdAt: now, updatedAt: now});
