@@ -1,5 +1,5 @@
 "use strict";
-// Saved chats for registered users (Danilo, 25 Sep 2026): owner, staff and members keep their
+// Saved chats for registered users (Danilo, 25 Sep 2026): owner, full-access and limited-access users keep their
 // chats on any device. Guests' chats stay only in their browser tab.
 // users/{uid}/chats/{chatId}               {title, createdAt, updatedAt, messageCount}
 // users/{uid}/chats/{chatId}/messages/{id} {role: "user"|"model", text, at, provider?, model?,

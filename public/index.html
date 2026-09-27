@@ -154,8 +154,8 @@
   #settingsWrap{display:none;flex:1;min-height:0;overflow:auto;padding:1rem;}
   #settingsInner{max-width:720px;margin:0 auto;}
   #settingsWrap h2{font-family:'Playfair Display',serif;font-size:1.25rem;margin:0 0 .7rem;color:var(--accent-ink);}
-  .tabs{display:flex;gap:.3rem;border-bottom:1px solid var(--line);margin-bottom:1rem;}
-  .tabs button{background:transparent;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:.5rem .8rem;cursor:pointer;font-weight:600;font-size:.85rem;}
+  .tabs{display:flex;gap:.3rem;border-bottom:1px solid var(--line);margin-bottom:1rem;overflow-x:auto;scrollbar-width:thin;}
+  .tabs button{flex:0 0 auto;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:.5rem .8rem;cursor:pointer;font-weight:600;font-size:.85rem;white-space:nowrap;}
   .tabs button.on{color:var(--ink);border-bottom-color:var(--accent);}
   .field{margin-bottom:1rem;} .field label{display:block;font-size:.8rem;font-weight:600;margin-bottom:.3rem;} .field small{display:block;color:var(--muted);font-size:.74rem;margin-bottom:.35rem;line-height:1.4;}
   .field textarea,.field input[type=text]{width:100%;border:1px solid var(--input-line);background:var(--input);color:var(--ink);border-radius:8px;padding:.55rem .65rem;font:inherit;font-size:.86rem;resize:vertical;}
@@ -252,17 +252,14 @@
   .cvCard:hover{border-color:var(--accent);} .cvCard b{font-size:.85rem;display:block;} .cvCard small{color:var(--muted);font-size:.72rem;}
   .cvCard .ic{font-size:1.2rem;}
   @media (max-width:820px){#canvasPanel{position:absolute;inset:0;z-index:25;flex-basis:auto;border-left:0;}}
-  /* Owner: staff panel */
-  #staffWrap{display:none;flex:1;min-height:0;overflow:auto;padding:1rem;}
-  #staffInner{max-width:760px;margin:0 auto;}
-  #staffWrap h2{font-family:'Playfair Display',serif;font-size:1.2rem;margin:0 0 .4rem;color:var(--accent-ink);}
+  /* Owner: account access inside Settings */
   .stats{font-size:.78rem;color:var(--muted);margin:0 0 1rem;line-height:1.5;}
   .acct{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:.7rem .8rem;margin-bottom:.55rem;display:flex;align-items:center;justify-content:space-between;gap:.6rem;}
   .acct b{font-size:.86rem;display:block;overflow-wrap:anywhere;}
   .acct small{font-size:.72rem;color:var(--muted);overflow-wrap:anywhere;}
   .pill{display:inline-block;font-size:.66rem;font-weight:700;border-radius:99px;padding:.1rem .45rem;margin-left:.3rem;vertical-align:middle;background:var(--side);color:var(--muted);}
-  .pill.staff,.pill.owner{background:var(--accent-soft);color:var(--accent-ink);}
-  .pill.removed{background:rgba(163,49,32,.15);color:var(--danger);}
+  .pill.full,.pill.owner{background:var(--accent-soft);color:var(--accent-ink);}
+  .pill.limited{background:var(--side);color:var(--muted);}
   .acct button{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:.45rem .7rem;font-weight:700;font-size:.75rem;cursor:pointer;white-space:nowrap;}
   .acct button.remove{background:transparent;color:var(--danger);border:1px solid var(--danger);}
 
@@ -272,6 +269,10 @@
     body.sideOpen #sidebar{transform:none;}
     body.sideOpen #scrim{display:block;position:absolute;inset:0;z-index:10;background:rgba(0,0,0,.35);}
     .bubble{max-width:92%;}
+  }
+  @media (max-width:560px){
+    .acct{align-items:flex-start;flex-direction:column;}
+    .acct button{width:100%;}
   }
 </style>
 </head>
@@ -283,7 +284,6 @@
     <div><b>✦ Accaza AI</b><small id="brandSub">AI assistant</small></div>
   </div>
   <div id="topbarActions">
-    <button id="staffBtn" type="button" style="display:none">Staff</button>
     <button id="signOutBtn" type="button">Sign out</button>
   </div>
 </div>
@@ -293,7 +293,7 @@
     <button id="newChatBtn" type="button">＋ New chat</button>
     <div id="chatList"></div>
     <div id="sideFoot">
-      <div class="who" id="whoLine"></div>
+      <div class="who" id="whoLine">© 2026 Accaza AI</div>
       <div class="row">
         <button id="canvasesBtn" type="button" style="display:none">Canvases</button>
         <button id="tasksBtn" type="button" style="display:none">Tasks</button>
@@ -328,7 +328,7 @@
   <div class="cardWrap" id="registerWrap">
     <div class="card">
       <h1>Create an account</h1>
-      <p>Your chats are saved and available on any device. New accounts get 10 messages a day; staff get unlimited chat once the owner approves them.</p>
+      <p>Your chats are saved and available on any device. New accounts start with limited access; the owner can grant full access.</p>
       <form id="registerForm">
         <label for="regName">Your name</label>
         <input id="regName" type="text" maxlength="60" autocomplete="name" required/>
@@ -388,7 +388,7 @@
         <button id="attachBtn" type="button" title="Attach photos or PDFs (up to 3, 7 MB each)" aria-label="Attach files">📎</button>
         <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/heic,image/heif,application/pdf,.heic,.heif" multiple hidden/>
         <select id="modelSelect" title="Choose the AI model" aria-label="AI model"><option value="auto">Auto</option></select>
-        <textarea id="question" maxlength="4000" rows="1" placeholder="Message Accaza AI, or attach a photo or PDF" aria-label="Message"></textarea>
+        <textarea id="question" maxlength="4000" rows="1" placeholder="" aria-label="Message Accaza AI"></textarea>
         <button id="askBtn" type="submit">Ask</button>
       </form>
       <div class="hint">Accaza AI can make mistakes. Check important information.</div>
@@ -423,7 +423,7 @@
   <div id="settingsWrap">
     <div id="settingsInner">
       <h2>Settings</h2>
-      <div class="tabs"><button type="button" id="tabPersonal" class="on">Personalise</button><button type="button" id="tabMemory">Memory</button><button type="button" id="tabConnectors" style="display:none">Connectors</button><button type="button" id="tabModels" style="display:none">Models</button></div>
+      <div class="tabs"><button type="button" id="tabPersonal" class="on">Personalise</button><button type="button" id="tabMemory">Memory</button><button type="button" id="tabAccess" style="display:none">Access</button><button type="button" id="tabConnectors" style="display:none">Connectors</button><button type="button" id="tabModels" style="display:none">Models</button></div>
       <div id="panePersonal">
         <div class="field"><label for="aboutMe">About you</label><small>What should Accaza AI know about you? For example your work, your business, your goals.</small><textarea id="aboutMe" rows="4" maxlength="1500"></textarea></div>
         <div class="field"><label for="replyStyle">How should Accaza AI reply?</label><small>Tone, length, format. For example "Short answers, bullet points, prices in PHP".</small><textarea id="replyStyle" rows="3" maxlength="1500"></textarea></div>
@@ -460,7 +460,7 @@
           <div class="field"><label for="mModel">Model name</label><small>Exactly as the provider names it, e.g. gpt-5-mini, claude-sonnet-4-5, mistral-large-latest.</small><input type="text" id="mModel" maxlength="120"/></div>
           <div class="field"><label for="mLabel">Name in the menu (optional)</label><input type="text" id="mLabel" maxlength="60"/></div>
           <div class="field"><label for="mKey">API key</label><input type="password" id="mKey" autocomplete="off"/></div>
-          <div class="field"><label for="mAudience">Who can use it</label><select id="mAudience" style="width:100%;padding:.5rem;border-radius:8px;border:1px solid var(--input-line);background:var(--input);color:var(--ink);font:inherit;font-size:.86rem"><option value="owner">Only me</option><option value="staff">Me and staff</option><option value="everyone">Everyone (members and guests too)</option></select></div>
+          <div class="field"><label for="mAudience">Who can use it</label><select id="mAudience" style="width:100%;padding:.5rem;border-radius:8px;border:1px solid var(--input-line);background:var(--input);color:var(--ink);font:inherit;font-size:.86rem"><option value="owner">Only me</option><option value="full">Full-access accounts</option><option value="everyone">Everyone</option></select></div>
           <div class="field"><label for="mCap">Daily limit (messages, 0 = no limit)</label><input type="text" id="mCap" inputmode="numeric" value="0"/></div>
           <label class="toggle"><input type="checkbox" id="mTools" checked/><span>Can use tools<small>Web search, skills and connectors. Untick if the model rejects tool calls.</small></span></label>
           <button class="btn" type="button" id="mSaveBtn">Test &amp; save</button>
@@ -471,6 +471,11 @@
         <div class="err" id="memoryErr"></div>
         <div id="memoryList"></div>
         <div style="margin-top:1rem"><button class="btn ghost" type="button" id="deleteMemoriesBtn">Delete all memories</button></div>
+      </div>
+      <div id="paneAccess" style="display:none">
+        <div class="sideNote" style="padding:0 0 .8rem">New verified accounts start with limited access. Grant full access when you want someone to use unlimited chat and the complete model list. Connectors, publishing and administration remain owner-only.</div>
+        <div class="stats" id="accessStats">Loading…</div>
+        <div id="accessList"></div>
       </div>
     </div>
   </div>
@@ -521,13 +526,6 @@
   <div id="tasksWrap" style="display:none;flex:1;min-height:0;overflow:auto;padding:1rem;">
     <div style="max-width:760px;margin:0 auto"><h2 style="font-family:'Playfair Display',serif;font-size:1.25rem;margin:0 0 .3rem;color:var(--accent-ink)">Tasks</h2><p id="tasksWorker" style="font-size:.8rem;color:var(--muted);margin:0 0 .7rem"></p><div id="taskList"></div></div>
   </div>
-  <div id="staffWrap">
-    <div id="staffInner">
-      <h2>Staff</h2>
-      <div class="stats" id="staffStats">Loading…</div>
-      <div id="staffList"></div>
-    </div>
-  </div>
 </div>
 <script type="module">
 import{initializeApp}from"https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
@@ -575,10 +573,10 @@ async function copyText(text,button){
 }
 
 // ---------- Views ----------
-const VIEWS=['loginWrap','registerWrap','resetWrap','verifyWrap','chatWrap','staffWrap','settingsWrap','skillsWrap','canvasesWrap','tasksWrap'];
+const VIEWS=['loginWrap','registerWrap','resetWrap','verifyWrap','chatWrap','settingsWrap','skillsWrap','canvasesWrap','tasksWrap'];
 function show(view){
-  VIEWS.forEach(v=>{by(v).style.display=v===view?(v==='staffWrap'||v==='settingsWrap'||v==='skillsWrap'||v==='canvasesWrap'||v==='tasksWrap'?'block':'flex'):'none';});
-  const inApp=view==='chatWrap'||view==='staffWrap'||view==='settingsWrap'||view==='skillsWrap'||view==='canvasesWrap'||view==='tasksWrap';
+  VIEWS.forEach(v=>{by(v).style.display=v===view?(v==='settingsWrap'||v==='skillsWrap'||v==='canvasesWrap'||v==='tasksWrap'?'block':'flex'):'none';});
+  const inApp=view==='chatWrap'||view==='settingsWrap'||view==='skillsWrap'||view==='canvasesWrap'||view==='tasksWrap';
   if(view!=='chatWrap')document.body.classList.remove('canvasOpen');
   by('topbarActions').style.display=inApp?'flex':'none';by('sidebar').style.display=inApp?'flex':'none';by('menuBtn').style.visibility=inApp?'visible':'hidden';
   closeSide();
@@ -610,10 +608,10 @@ let ME={tier:''};
 const saves=()=>ME.tier&&ME.tier!=='guest';
 function setAllowance(remaining){
   const t=ME.tier;
-  if(t==='owner'||t==='staff'){by('brandSub').textContent=(t==='owner'?'Owner':'Staff')+' · unlimited';by('banner').style.display='none';return;}
+  if(t==='owner'||t==='full'){by('brandSub').textContent=(t==='owner'?'Owner':'Full access')+' · unlimited';by('banner').style.display='none';return;}
   const left=remaining==null?'10 messages per day':remaining+' of 10 messages left today';
   by('brandSub').textContent=(t==='guest'?'Guest · ':'')+left;
-  if(t==='member'){by('banner').textContent='Your account has 10 messages a day. If you are staff, ask the owner to approve your account for unlimited chat.';by('banner').style.display='block';}
+  if(t==='limited'){by('banner').textContent='Your account has limited access with 10 messages a day. The owner can grant full access.';by('banner').style.display='block';}
   else by('banner').style.display='none';
 }
 
@@ -961,12 +959,14 @@ q.addEventListener('keydown',ev=>{
 // ---------- Settings: personalise + memory ----------
 function openSettings(tab){show('settingsWrap');selectTab(tab||'personal');loadSettings();}
 function selectTab(tab){
-  const t=['personal','memory','connectors','models'].includes(tab)?tab:'personal';
-  by('tabPersonal').classList.toggle('on',t==='personal');by('tabMemory').classList.toggle('on',t==='memory');by('tabConnectors').classList.toggle('on',t==='connectors');by('tabModels').classList.toggle('on',t==='models');
-  by('panePersonal').style.display=t==='personal'?'block':'none';by('paneMemory').style.display=t==='memory'?'block':'none';by('paneConnectors').style.display=t==='connectors'?'block':'none';by('paneModels').style.display=t==='models'?'block':'none';
+  const t=['personal','memory','access','connectors','models'].includes(tab)?tab:'personal';
+  by('tabPersonal').classList.toggle('on',t==='personal');by('tabMemory').classList.toggle('on',t==='memory');by('tabAccess').classList.toggle('on',t==='access');by('tabConnectors').classList.toggle('on',t==='connectors');by('tabModels').classList.toggle('on',t==='models');
+  by('panePersonal').style.display=t==='personal'?'block':'none';by('paneMemory').style.display=t==='memory'?'block':'none';by('paneAccess').style.display=t==='access'?'block':'none';by('paneConnectors').style.display=t==='connectors'?'block':'none';by('paneModels').style.display=t==='models'?'block':'none';
+  if(t==='access')loadAccess();
   if(t==='connectors')loadConnectors();
   if(t==='models')loadModelAdmin();
 }
+by('tabAccess').addEventListener('click',()=>selectTab('access'));
 by('tabConnectors').addEventListener('click',()=>selectTab('connectors'));
 by('tabModels').addEventListener('click',()=>selectTab('models'));
 let providerPresets=[];
@@ -979,7 +979,7 @@ async function loadModelAdmin(){
     if(!(d.models||[]).length){const n=document.createElement('div');n.className='sideNote';n.style.padding='0';n.textContent='None yet.';list.appendChild(n);}
     (d.models||[]).forEach(m=>{
       const row=document.createElement('div'),t=document.createElement('span'),x=document.createElement('button');row.className='fileRow';
-      t.textContent=m.label+' · '+m.providerLabel+' · '+{owner:'only me',staff:'me + staff',everyone:'everyone'}[m.audience]+(m.dailyCap?' · '+m.dailyCap+'/day':'');t.title=m.model;
+      t.textContent=m.label+' · '+m.providerLabel+' · '+({owner:'only me',full:'full access',staff:'full access',everyone:'everyone'}[m.audience]||'only me')+(m.dailyCap?' · '+m.dailyCap+'/day':'');t.title=m.model;
       x.type='button';x.textContent='✕';x.title='Remove';x.addEventListener('click',async()=>{x.disabled=true;try{await accountCall({action:'modelDelete',modelId:m.id});row.remove();loadModelMenu();}catch(e){x.disabled=false;}});
       row.append(t,x);list.appendChild(row);
     });
@@ -1227,32 +1227,31 @@ by('resendBtn').addEventListener('click',async()=>{
   try{await sendEmailVerification(auth.currentUser);showMsg('verifyInfo','Sent. Check your inbox and spam folder.');}catch(e){showMsg('verifyErr',friendly(e));}
 });
 
-// ---------- Owner: approve or remove staff ----------
-async function loadStaff(){
-  by('staffStats').textContent='Loading…';by('staffList').replaceChildren();
+// ---------- Owner: account access ----------
+async function loadAccess(){
+  by('accessStats').textContent='Loading…';by('accessList').replaceChildren();
   try{
     const data=(await accountCall({action:'list'})).data||{},t=data.today||{};
     const backups=Object.entries(t.backupAnswers||{}).map(([k,v])=>k+' '+v).join(', ')||'none';
-    by('staffStats').textContent=`Today (${t.day}): ${t.limitedMessages||0} of ${t.sharedLimit||100} guest/member messages used. Backup AI answers: ${backups}. Unanswered questions: ${t.failedQuestions||0}.`;
+    by('accessStats').textContent=`Today (${t.day}): ${t.limitedMessages||0} of ${t.sharedLimit||100} limited-access messages used. Backup AI answers: ${backups}. Unanswered questions: ${t.failedQuestions||0}.`;
     (data.users||[]).forEach(u=>{
       const row=document.createElement('div');row.className='acct';
       const info=document.createElement('div'),title=document.createElement('b'),sub=document.createElement('small'),pill=document.createElement('span');
-      const label=u.role==='owner'?'owner':u.role==='staff'?'staff':u.status==='removed'?'removed':'member';
-      title.textContent=u.name||u.email;pill.className='pill '+label;pill.textContent=label;title.appendChild(pill);
+      const level=u.accessLevel==='owner'?'owner':u.accessLevel==='full'?'full':'limited';
+      title.textContent=u.name||u.email;pill.className='pill '+level;pill.textContent=level==='owner'?'Owner':level==='full'?'Full access':'Limited access';title.appendChild(pill);
       sub.textContent=u.email+(u.createdAt?' · joined '+new Date(u.createdAt).toLocaleDateString():'');
       info.append(title,sub);row.appendChild(info);
-      if(u.role!=='owner'){
-        const btn=document.createElement('button'),approve=u.role!=='staff';
-        btn.textContent=approve?'Approve as staff':'Remove staff';if(!approve)btn.className='remove';
-        btn.addEventListener('click',async()=>{btn.disabled=true;try{await accountCall({action:approve?'approve':'remove',uid:u.uid});await loadStaff();}catch(e){btn.disabled=false;btn.textContent=(e&&e.message)||'Could not update';}});
+      if(level!=='owner'){
+        const btn=document.createElement('button'),grant=level!=='full';
+        btn.textContent=grant?'Grant full access':'Return to limited access';if(!grant)btn.className='remove';
+        btn.addEventListener('click',async()=>{btn.disabled=true;try{await accountCall({action:grant?'grantFull':'setLimited',uid:u.uid});await loadAccess();}catch(e){btn.disabled=false;btn.textContent=cleanErr(e,'Could not update');}});
         row.appendChild(btn);
       }
-      by('staffList').appendChild(row);
+      by('accessList').appendChild(row);
     });
-    if(!(data.users||[]).length)by('staffList').textContent='No accounts yet.';
-  }catch(e){by('staffStats').textContent=(e&&e.message)||'Could not load accounts.';}
+    if(!(data.users||[]).length)by('accessList').textContent='No accounts yet.';
+  }catch(e){by('accessStats').textContent=cleanErr(e,'Could not load accounts.');}
 }
-by('staffBtn').addEventListener('click',()=>{if(by('staffWrap').style.display==='block'){show('chatWrap');by('staffBtn').textContent='Staff';}else{show('staffWrap');by('staffBtn').textContent='Back to chat';loadStaff();}});
 
 // ---------- Canvas (pages, apps and long code beside the chat) ----------
 // The preview runs in a sandboxed iframe (no same-origin access to this app) with the same
@@ -1492,7 +1491,7 @@ function setTaskMode(on){
   taskMode=Boolean(on)&&ME.tier==='owner';
   const b=by('taskBtn');b.classList.toggle('on',taskMode);b.setAttribute('aria-pressed',String(taskMode));
   by('askForm').classList.toggle('taskMode',taskMode);
-  q.placeholder=taskMode?'Describe a task for your laptop…':'Message Accaza AI, or attach a photo or PDF';
+  q.placeholder=taskMode?'Describe a task for your laptop…':'';q.setAttribute('aria-label',taskMode?'Describe a task':'Message Accaza AI');
   by('attachBtn').title=taskMode?'Attach files for the task (up to 5, 10 MB each)':'Attach photos or PDFs (up to 3, 7 MB each)';
   by('modelSelect').style.display=taskMode?'none':'';
   if(taskMode&&pending.length)pending=[];
@@ -1683,7 +1682,7 @@ let renderSeq=0,lastUid='';
 async function render(user){
   const seq=++renderSeq;
   if(!user||(user.isAnonymous&&!guestChosen())){
-    ME={tier:''};lastUid='';by('brandSub').textContent='AI assistant';by('staffBtn').style.display='none';
+    ME={tier:''};lastUid='';by('brandSub').textContent='AI assistant';
     show(chosenView==='register'?'registerWrap':chosenView==='reset'?'resetWrap':'loginWrap');return;
   }
   if(!user.isAnonymous&&!user.emailVerified){
@@ -1692,21 +1691,20 @@ async function render(user){
   }
   const changed=user.uid!==lastUid;lastUid=user.uid;
   by('signOutBtn').textContent=user.isAnonymous?'Exit guest':'Sign out';
-  by('staffBtn').style.display='none';by('staffBtn').textContent='Staff';by('settingsBtn').style.display='none';by('taskBtn').style.display='none';by('tasksBtn').style.display='none';by('skillsBtn').style.display='none';by('canvasesBtn').style.display='none';
-  ME={tier:user.isAnonymous?'guest':'member'};setAllowance(null);
-  by('whoLine').textContent=user.isAnonymous?'Guest':(user.displayName||user.email||'');
+  by('settingsBtn').style.display='none';by('taskBtn').style.display='none';by('tasksBtn').style.display='none';by('skillsBtn').style.display='none';by('canvasesBtn').style.display='none';by('tabAccess').style.display='none';
+  ME={tier:user.isAnonymous?'guest':'limited'};setAllowance(null);
+  by('whoLine').textContent='© 2026 Accaza AI';
   if(changed){current=null;chats=[];cv=null;closeCanvas();turns=user.isAnonymous?loadGuestTurns():[];}
   renderTurns();renderChatList();show('chatWrap');
   try{
     const me=(await accountCall({action:'me'})).data||{};if(seq!==renderSeq)return;
     if(me.tier==='unverified'){show('verifyWrap');return;}
     ME=me;setAllowance(me.remaining);
-    if(me.tier==='owner')by('staffBtn').style.display='inline-block';
     by('taskBtn').style.display=me.tier==='owner'?'':'none';by('tasksBtn').style.display=me.tier==='owner'?'inline-block':'none';if(me.tier!=='owner')setTaskMode(false);
-    by('settingsBtn').style.display=saves()?'inline-block':'none';by('tabConnectors').style.display=(me.tier==='owner'||me.tier==='staff')?'inline-block':'none';by('tabModels').style.display=me.tier==='owner'?'inline-block':'none';
+    by('settingsBtn').style.display=saves()?'inline-block':'none';by('tabAccess').style.display=me.tier==='owner'?'inline-block':'none';by('tabConnectors').style.display=me.tier==='owner'?'inline-block':'none';by('tabModels').style.display=me.tier==='owner'?'inline-block':'none';
     loadModelMenu();
     if(connectorReturn&&saves()){const st=connectorReturn;connectorReturn=null;openSettings('connectors');const msg={connected:'Google connected.','no-access':'Google connected, but no access was granted. Try again and tick the boxes.',cancelled:'Google sign-in was cancelled.',expired:'That sign-in link expired. Please try again.',error:'Google sign-in failed. Please try again.'}[st]||'';setTimeout(()=>{showMsg(st==='connected'?'connInfo':'connErr',msg);},400);}by('skillsBtn').style.display=saves()?'inline-block':'none';by('canvasesBtn').style.display=saves()?'inline-block':'none';mySkills=[];
-    by('whoLine').textContent=user.isAnonymous?'Guest':((me.name||user.email||'')+' · '+me.tier);
+    by('whoLine').textContent='© 2026 Accaza AI';
     if(saves()&&changed)await loadChats();else renderChatList();
   }catch(e){console.warn('account check failed',e);}
 }

@@ -13,7 +13,7 @@ const {HttpsError} = require("firebase-functions/v2/https");
 const SITES_ORIGIN = "https://accaza-sites.web.app";
 const MAX_CODE = 400000;
 const MAX_VERSIONS_KEPT = 50;
-const PUBLISH_TIERS = ["owner", "staff"];
+const PUBLISH_TIERS = ["owner"];
 const RESERVED = new Set(["a", "api", "admin", "assets", "static", "login", "app", "www", "index", "favicon.ico", "robots.txt", "sitemap.xml"]);
 const LIBS = {
   react: "https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js",

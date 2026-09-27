@@ -1,10 +1,10 @@
 "use strict";
 // Who may chat and how much (Danilo, 25 Sep 2026):
-// - owner: the emails in OWNER_EMAILS, once the email is verified. Unlimited; approves staff.
-// - staff: registered accounts the owner approved. Unlimited.
-// - member: registered, email verified, not yet approved. Guest limits.
+// - owner: the emails in OWNER_EMAILS, once the email is verified. Full administrative access.
+// - full: a registered account the owner granted full usage access. Unlimited chat.
+// - limited: every other registered, verified account. Daily limits apply.
 // - guest: anonymous sign-in. 10 messages per Manila day each.
-// Members and guests also share one daily ceiling across everyone, so resetting a browser
+// Limited users and guests also share one daily ceiling across everyone, so resetting a browser
 // (new anonymous account) or registering many emails cannot run up the AI bill without bound.
 const {HttpsError} = require("firebase-functions/v2/https");
 
@@ -26,7 +26,14 @@ function isOwnerEmail(email) {
   return OWNER_EMAILS.includes(normalEmail(email));
 }
 function unlimited(tier) {
-  return tier === "owner" || tier === "staff";
+  return tier === "owner" || tier === "full";
+}
+// Backward compatibility: old user documents used role=staff/status=approved. New writes keep
+// those legacy fields temporarily so older deployed function revisions do not revoke access.
+function userAccessLevel(user) {
+  if (user && user.accessLevel === "full") return "full";
+  if (user && user.accessLevel === "limited") return "limited";
+  return user && user.role === "staff" && user.status === "approved" ? "full" : "limited";
 }
 
 // Returns {uid, tier, email, name}. Throws for a missing login or an unverified email.
@@ -38,7 +45,7 @@ async function resolveAccount(db, auth) {
   if (!(auth.token && auth.token.email_verified === true)) throw new HttpsError("failed-precondition", "Verify your email first. Open the link we emailed you, then tap \"I've verified\".");
   if (isOwnerEmail(email)) return {uid: auth.uid, tier: "owner", email, name: cleanName(auth.token.name) || email};
   const snap = await db.collection("users").doc(auth.uid).get(), user = snap.exists ? snap.data() : {};
-  const tier = user.role === "staff" && user.status === "approved" ? "staff" : "member";
+  const tier = userAccessLevel(user);
   return {uid: auth.uid, tier, email, name: cleanName(user.name) || email};
 }
 function cleanName(value) {
@@ -77,4 +84,4 @@ async function usedToday(db, uid, day) {
   return Number(usage.users && usage.users[uid] && usage.users[uid].count || 0);
 }
 
-module.exports = {OWNER_EMAILS, DAILY_LIMIT, SHARED_DAILY_LIMIT, manilaDay, isAnonymous, normalEmail, isOwnerEmail, unlimited, resolveAccount, cleanName, claimMessage, releaseMessage, usedToday};
+module.exports = {OWNER_EMAILS, DAILY_LIMIT, SHARED_DAILY_LIMIT, manilaDay, isAnonymous, normalEmail, isOwnerEmail, unlimited, userAccessLevel, resolveAccount, cleanName, claimMessage, releaseMessage, usedToday};

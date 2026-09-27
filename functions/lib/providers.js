@@ -1,13 +1,13 @@
 "use strict";
 // AI chain for the standalone Accaza AI app (ChatGPT-style, v1.3: memory, tools).
-// Order: Gemini (owner/staff: 3.8 Flash, then Flash-Lite) -> Groq -> Cerebras -> DeepSeek -> Qwen (Ollama on SUPERDAD) -> Ashna -> JEV Router.
+// Order: Gemini (owner/full access: 3.8 Flash, then Flash-Lite) -> Groq -> Cerebras -> DeepSeek -> Qwen (Ollama on SUPERDAD) -> Ashna -> JEV Router.
 // Replies stream: each provider pushes text pieces through ctx.onDelta as they arrive. A provider
 // that fails before or during its reply is a provider failure; if it had already streamed some
 // text, the caller is told to reset (the client clears the bubble) and the next provider answers.
 const {HttpsError} = require("firebase-functions/v2/https");
 
 const GEMINI = {
-  // Owner and staff get the stronger model; members and guests the cheaper one (Danilo, 25 Sep 2026).
+  // Owner and full-access users get the stronger model; limited users and guests the cheaper one.
   standard: {model: "gemini-3.5-flash-lite", maxOutputTokens: 2048, thinkingLevel: null},
   strong: {model: "gemini-3.8-flash", maxOutputTokens: 4096, thinkingLevel: "low"},
 };
@@ -335,7 +335,7 @@ function builtinProvider(id, req) {
     // Ashna keeps a reserved slice of the budget so a slow Qwen reply cannot use up the last turn.
     case "ashna": return {name: "ashna", model: ASHNA.model, files: false, tools: false, firstMs: ASHNA_TIMEOUT_MS, reserveMs: ASHNA_TIMEOUT_MS, enabled: () => Boolean(key("ashna")), ask: (l, c) => askOpenAiCompatible(Object.assign({}, ASHNA, {tools: false}), key("ashna"), noTools, l, c)};
     // OpenRouter's hosted JEV Router chooses the downstream model and reasoning effort. This app
-    // retains control of the outer fallback cascade and owner/staff can select JEV manually.
+    // retains control of the outer fallback cascade and full-access users can select JEV manually.
     case "jev": return {name: "jev", model: JEV_ROUTER.model, files: false, tools: true, firstMs: JEV_TIMEOUT_MS, reserveMs: JEV_TIMEOUT_MS,
       enabled: () => Boolean(key("openrouter")), ask: (l, c) => askOpenAiCompatible(JEV_ROUTER, key("openrouter"), req, l, c)};
     default: return null;
@@ -343,14 +343,14 @@ function builtinProvider(id, req) {
 }
 
 // req: {question, history, keys, tier, files?, system?, tools?, chosen?}. "Auto" order: Gemini
-// (owner/staff: 3.8 Flash, then Flash-Lite) -> Groq -> Cerebras -> DeepSeek -> Qwen -> Ashna ->
+// (owner/full access: 3.8 Flash, then Flash-Lite) -> Groq -> Cerebras -> DeepSeek -> Qwen -> Ashna ->
 // JEV Router. With
 // files, a second Gemini attempt always follows the first, because only Gemini can read them.
 // req.chosen (a provider object from the model menu) goes first, unless files are attached and
 // it cannot read them; the rest of the Auto chain stays behind it as the fallback.
 function generalChatProviders(req) {
   const files = req.files || [];
-  const strong = req.tier === "owner" || req.tier === "staff";
+  const strong = req.tier === "owner" || req.tier === "full";
   const first = builtinProvider(strong ? "gemini" : "gemini-lite", req);
   const auto = [
     Object.assign({}, first, {name: "gemini"}),
