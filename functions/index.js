@@ -25,12 +25,14 @@ const {getStorage} = require("firebase-admin/storage");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.12";
+const RELEASE_VERSION = "1.13";
 const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const GROQ_API_KEY = defineSecret("GROQ_API_KEY");
-const CEREBRAS_API_KEY = defineSecret("CEREBRAS_API_KEY");
+// Cloudflare Workers AI replaced Cerebras in chat on 1 Nov 2026 (the laptop worker reads CEREBRAS_API_KEY itself).
+const CLOUDFLARE_AI_TOKEN = defineSecret("CLOUDFLARE_AI_TOKEN");
+const CLOUDFLARE_ACCOUNT_ID = defineSecret("CLOUDFLARE_ACCOUNT_ID");
 const DEEPSEEK_API_KEY = defineSecret("DEEPSEEK_API_KEY");
 const OLLAMA_ACCESS_CLIENT_ID = defineSecret("OLLAMA_ACCESS_CLIENT_ID");
 const OLLAMA_ACCESS_CLIENT_SECRET = defineSecret("OLLAMA_ACCESS_CLIENT_SECRET");
@@ -45,9 +47,9 @@ const GOOGLE_OAUTH_CLIENT_SECRET = defineSecret("GOOGLE_OAUTH_CLIENT_SECRET");
 const CONNECTOR_SECRETS = [CONNECTOR_TOKEN_KEY, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET];
 const CONNECTOR_TIERS = ["owner"];
 function googleConfig() { return {clientId: GOOGLE_OAUTH_CLIENT_ID.value().trim(), clientSecret: GOOGLE_OAUTH_CLIENT_SECRET.value().trim(), tokenKey: CONNECTOR_TOKEN_KEY.value().trim()}; }
-const AI_SECRETS = [GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY, OPENROUTER_API_KEY];
+const AI_SECRETS = [GEMINI_API_KEY, GROQ_API_KEY, CLOUDFLARE_AI_TOKEN, CLOUDFLARE_ACCOUNT_ID, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY, OPENROUTER_API_KEY];
 const KEYS = {
-  gemini: () => GEMINI_API_KEY.value(), groq: () => GROQ_API_KEY.value(), cerebras: () => CEREBRAS_API_KEY.value(), deepseek: () => DEEPSEEK_API_KEY.value(),
+  gemini: () => GEMINI_API_KEY.value(), groq: () => GROQ_API_KEY.value(), cloudflare: () => CLOUDFLARE_AI_TOKEN.value(), cloudflareAccount: () => CLOUDFLARE_ACCOUNT_ID.value(), deepseek: () => DEEPSEEK_API_KEY.value(),
   ollamaId: () => OLLAMA_ACCESS_CLIENT_ID.value(), ollamaSecret: () => OLLAMA_ACCESS_CLIENT_SECRET.value(), ashna: () => ASHNA_API_KEY.value(),
   openrouter: () => OPENROUTER_API_KEY.value(),
 };

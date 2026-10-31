@@ -42,7 +42,7 @@ Live at **https://accaza-ai.web.app**.
     - SSRF-guarded.
   - Content from connected apps is treated as data, never as instructions.
 - **Model menu** next to the message box. **Auto** is the normal chain, or pick a model:
-  - Owner/full-access users can pick any built-in model. Limited users and guests can pick Flash-Lite, Groq, Cerebras or DeepSeek.
+  - Owner/full-access users can pick any built-in model. Limited users and guests can pick Flash-Lite, Groq, Cloudflare or DeepSeek. A chat remembered on Cerebras (retired 1 Nov 2026) moves to Cloudflare.
   - The picked model goes first, with the Auto chain behind it. A note appears when a backup answered, or when the picked model can't read an attached file.
   - The choice is remembered per chat.
 - **Owner-added models** (Settings → Models):
@@ -57,7 +57,7 @@ Live at **https://accaza-ai.web.app**.
 - Models:
   - Owner and full-access users start on **Gemini 3.8 Flash**, then **Flash-Lite**.
   - Limited users and guests start on **Flash-Lite**.
-  - Then everyone falls back through Groq → Cerebras → DeepSeek → Qwen (Ollama on SUPERDAD) → Ashna → JEV Router (`typesafe/jev-router` on OpenRouter). Full-access users can also select JEV directly from the model menu. If one AI fails or times out, the next one answers. If it fails part-way through a reply, the partial reply is cleared and the next one starts over.
+  - Then everyone falls back through Groq → Cloudflare Workers AI (`@cf/openai/gpt-oss-120b`, free daily allowance, no training on content) → DeepSeek → Qwen (Ollama on SUPERDAD) → Ashna → OpenRouter free models (Gemma 4 31B, then two Nemotron models; 50 requests/day free; free endpoints may train on chats) → JEV Router (`typesafe/jev-router` on OpenRouter). Full-access users can also select OpenRouter or JEV directly from the model menu. If one AI fails or times out, the next one answers. If it fails part-way through a reply, the partial reply is cleared and the next one starts over.
 - Who can chat:
 
   | Who | How they get in | Daily limit |
@@ -136,13 +136,15 @@ Cowork-style tasks run on the owner's laptop (SUPERDAD), not in Cloud Functions.
 
 ## AI keys
 
-The keys are stored as Secret Manager secrets in `accaza-ai`: GEMINI_API_KEY, GROQ_API_KEY, CEREBRAS_API_KEY, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY, OPENROUTER_API_KEY, WEB_SEARCH_KEY, CONNECTOR_TOKEN_KEY, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET. They never go in this repository. JEV Router uses OpenRouter's standard API with model `typesafe/jev-router`; no local router, Cloudflare hostname or SUPERDAD service is required. To change one:
+The keys are stored as Secret Manager secrets in `accaza-ai`: GEMINI_API_KEY, GROQ_API_KEY, CLOUDFLARE_AI_TOKEN, CLOUDFLARE_ACCOUNT_ID, DEEPSEEK_API_KEY, OLLAMA_ACCESS_CLIENT_ID, OLLAMA_ACCESS_CLIENT_SECRET, ASHNA_API_KEY, OPENROUTER_API_KEY, WEB_SEARCH_KEY, CONNECTOR_TOKEN_KEY, GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET. They never go in this repository. JEV Router uses OpenRouter's standard API with model `typesafe/jev-router`; no local router, Cloudflare hostname or SUPERDAD service is required. To change one:
 
 ```powershell
 firebase functions:secrets:set GEMINI_API_KEY --project accaza-ai
 ```
 
-For JEV, configure the OpenRouter key before deploying `chat`:
+CEREBRAS_API_KEY is still read by the laptop task worker only. For Cloudflare, set both CLOUDFLARE_AI_TOKEN (a Workers AI token) and CLOUDFLARE_ACCOUNT_ID (the 32-character account id) before deploying `chat`.
+
+For JEV and the OpenRouter free models, configure the OpenRouter key before deploying `chat` (free models also need OpenRouter's "free endpoints that train on request data" setting on and ZDR off):
 
 ```powershell
 firebase functions:secrets:set OPENROUTER_API_KEY --project accaza-ai

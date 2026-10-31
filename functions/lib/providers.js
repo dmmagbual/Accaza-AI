@@ -1,6 +1,8 @@
 "use strict";
 // AI chain for the standalone Accaza AI app (ChatGPT-style, v1.3: memory, tools).
-// Order: Gemini (owner/full access: 3.8 Flash, then Flash-Lite) -> Groq -> Cerebras -> DeepSeek -> Qwen (Ollama on SUPERDAD) -> Ashna -> JEV Router.
+// Order: Gemini (owner/full access: 3.8 Flash, then Flash-Lite) -> Groq -> Cloudflare -> DeepSeek -> Qwen (Ollama on SUPERDAD) -> Ashna -> OpenRouter (free models) -> JEV Router.
+// 1 Nov 2026 (Danilo): Cloudflare Workers AI replaced Cerebras in chat (Cerebras prepaid credit ran out,
+// HTTP 402) and OpenRouter free models were added before JEV. The laptop task worker still uses CEREBRAS.
 // Replies stream: each provider pushes text pieces through ctx.onDelta as they arrive. A provider
 // that fails before or during its reply is a provider failure; if it had already streamed some
 // text, the caller is told to reset (the client clears the bubble) and the next provider answers.
@@ -29,6 +31,18 @@ const OLLAMA_MAX_TOKENS = 350;
 // Groq's free tier allows 8,000 tokens per minute (prompt + max_tokens), so its cap stays modest.
 const GROQ = {label: "Groq", url: "https://api.groq.com/openai/v1/chat/completions", model: "openai/gpt-oss-120b", maxTokens: 1500, bigTokens: 1500, extra: {reasoning_effort: "low"}};
 const CEREBRAS = {label: "Cerebras", url: "https://api.cerebras.ai/v1/chat/completions", model: "gpt-oss-120b", maxTokens: 3000, extra: {reasoning_effort: "low"}};
+// Cloudflare Workers AI: free daily allowance, same gpt-oss-120b model; the URL carries the account id.
+// Cloudflare does not train on Workers AI content. When the daily allowance is used up the call fails
+// and the next provider answers.
+const CLOUDFLARE = {label: "Cloudflare", model: "@cf/openai/gpt-oss-120b", maxTokens: 3000, extra: {reasoning_effort: "low"}};
+function cloudflareUrl(accountId) { return `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`; }
+function cloudflareAccount(value) { const id = headerValue(value).toLowerCase(); return /^[0-9a-f]{32}$/.test(id) ? id : ""; }
+// OpenRouter free models: free tier is 20 requests/minute and 50/day (1,000/day after a one-off USD 10
+// credit); free endpoints may log or train on what is sent (Danilo accepted this). `models` lets
+// OpenRouter route to the next free model when one is busy (HTTP 429).
+const OPENROUTER_FREE = {label: "OpenRouter", url: "https://openrouter.ai/api/v1/chat/completions", model: "google/gemma-4-31b-it:free", maxTokens: 3000, tools: true,
+  extra: {models: ["google/gemma-4-31b-it:free", "nvidia/nemotron-3.5-super-vl:free", "nvidia/nemotron-3-ultra-550b-a55b:free"]},
+  headers: {"HTTP-Referer": "https://accaza-ai.web.app", "X-OpenRouter-Title": "Accaza AI"}};
 const DEEPSEEK = {label: "DeepSeek", url: "https://api.deepseek.com/chat/completions", model: "deepseek-flash", maxTokens: 2000, extra: {}};
 const ASHNA = {label: "Ashna", url: "https://api.ashna.ai/v1/api/chat/completions", model: "glm-5.3-flash", maxTokens: 1500, extra: {}};
 const OLLAMA_URL = "https://ollama.accazacoffee.com/api/chat";
@@ -76,9 +90,13 @@ function finalAnswer(value) {
   if (!text) throw providerFailure("The provider returned an empty answer.");
   return text;
 }
+// Providers put error text in different places: OpenAI-style error.message, a top-level message
+// (Cerebras), or errors[0].message (Cloudflare).
 function providerMessage(body, fallback) {
-  const error = body && body.error;
-  return cleanText(error && typeof error === "object" ? error.message : error, 200) || fallback;
+  const error = body && body.error, first = body && Array.isArray(body.errors) ? body.errors[0] : null;
+  return cleanText(error && typeof error === "object" ? error.message : error, 200)
+    || cleanText(body && typeof body.message === "string" ? body.message : "", 200)
+    || cleanText(first && first.message, 200) || fallback;
 }
 // A reply cut off by the token cap ends at its last complete sentence instead of mid-word.
 function trimToSentence(text) {
@@ -120,7 +138,8 @@ async function streamLines(label, url, init, limits, onLine) {
     const response = await fetch(url, Object.assign({}, init, {signal: controller.signal}));
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
-      throw providerFailure(providerMessage(body, `${label} could not answer right now (HTTP ${response.status}).`));
+      // The status leads so a cut-off health reason still shows e.g. "HTTP 402".
+      throw providerFailure(`HTTP ${response.status}: ${providerMessage(body, `${label} could not answer right now.`)}`);
     }
     const type = String(response.headers.get("content-type") || "");
     if (type.includes("application/json")) {
@@ -321,7 +340,7 @@ function noToolsSystem(req) {
 
 // Built-in providers by id (the ids the model menu uses). files = can read attachments,
 // tools = can use web search / skills / connectors.
-const BUILTIN_IDS = ["gemini", "gemini-lite", "groq", "cerebras", "deepseek", "ollama", "ashna", "jev"];
+const BUILTIN_IDS = ["gemini", "gemini-lite", "groq", "cloudflare", "deepseek", "ollama", "ashna", "openrouter", "jev"];
 function builtinProvider(id, req) {
   const keys = req.keys || {}, key = name => headerValue(keys[name] ? keys[name]() : "");
   const noTools = Object.assign({}, req, {tools: null, system: noToolsSystem(req)});
@@ -329,11 +348,17 @@ function builtinProvider(id, req) {
     case "gemini": return {name: "gemini", model: GEMINI.strong.model, files: true, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: (l, c) => askGemini(key("gemini"), GEMINI.strong, req, l, c)};
     case "gemini-lite": return {name: "gemini-lite", model: GEMINI.standard.model, files: true, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("gemini")), ask: (l, c) => askGemini(key("gemini"), GEMINI.standard, req, l, c)};
     case "groq": return {name: "groq", model: GROQ.model, files: false, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("groq")), ask: (l, c) => askOpenAiCompatible(GROQ, key("groq"), req, l, c)};
-    case "cerebras": return {name: "cerebras", model: CEREBRAS.model, files: false, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("cerebras")), ask: (l, c) => askOpenAiCompatible(CEREBRAS, key("cerebras"), req, l, c)};
+    case "cloudflare": {
+      const account = cloudflareAccount(keys.cloudflareAccount ? keys.cloudflareAccount() : "");
+      return {name: "cloudflare", model: CLOUDFLARE.model, files: false, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("cloudflare") && account),
+        ask: (l, c) => askOpenAiCompatible(Object.assign({}, CLOUDFLARE, {url: cloudflareUrl(account)}), key("cloudflare"), req, l, c)};
+    }
     case "deepseek": return {name: "deepseek", model: DEEPSEEK.model, files: false, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("deepseek")), ask: (l, c) => askOpenAiCompatible(DEEPSEEK, key("deepseek"), req, l, c)};
     case "ollama": return {name: "ollama", model: "qwen3:8b", files: false, tools: false, firstMs: OLLAMA_FIRST_TEXT_MS, enabled: () => Boolean(key("ollamaId") && key("ollamaSecret")), ask: (l, c) => askOllama(key("ollamaId"), key("ollamaSecret"), req, l, c)};
     // Ashna keeps a reserved slice of the budget so a slow Qwen reply cannot use up the last turn.
     case "ashna": return {name: "ashna", model: ASHNA.model, files: false, tools: false, firstMs: ASHNA_TIMEOUT_MS, reserveMs: ASHNA_TIMEOUT_MS, enabled: () => Boolean(key("ashna")), ask: (l, c) => askOpenAiCompatible(Object.assign({}, ASHNA, {tools: false}), key("ashna"), noTools, l, c)};
+    // OpenRouter free models: the free backup before JEV (same OPENROUTER_API_KEY).
+    case "openrouter": return {name: "openrouter", model: OPENROUTER_FREE.model, files: false, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("openrouter")), ask: (l, c) => askOpenAiCompatible(OPENROUTER_FREE, key("openrouter"), req, l, c)};
     // OpenRouter's hosted JEV Router chooses the downstream model and reasoning effort. This app
     // retains control of the outer fallback cascade and full-access users can select JEV manually.
     case "jev": return {name: "jev", model: JEV_ROUTER.model, files: false, tools: true, firstMs: JEV_TIMEOUT_MS, reserveMs: JEV_TIMEOUT_MS,
@@ -343,8 +368,8 @@ function builtinProvider(id, req) {
 }
 
 // req: {question, history, keys, tier, files?, system?, tools?, chosen?}. "Auto" order: Gemini
-// (owner/full access: 3.8 Flash, then Flash-Lite) -> Groq -> Cerebras -> DeepSeek -> Qwen -> Ashna ->
-// JEV Router. With
+// (owner/full access: 3.8 Flash, then Flash-Lite) -> Groq -> Cloudflare -> DeepSeek -> Qwen -> Ashna ->
+// OpenRouter (free models) -> JEV Router. With
 // files, a second Gemini attempt always follows the first, because only Gemini can read them.
 // req.chosen (a provider object from the model menu) goes first, unless files are attached and
 // it cannot read them; the rest of the Auto chain stays behind it as the fallback.
@@ -355,9 +380,9 @@ function generalChatProviders(req) {
   const auto = [
     Object.assign({}, first, {name: "gemini"}),
     ...(strong || files.length ? [builtinProvider("gemini-lite", req)] : []),
-    ...["groq", "cerebras", "deepseek", "ollama", "ashna", "jev"].map(id => builtinProvider(id, req)),
+    ...["groq", "cloudflare", "deepseek", "ollama", "ashna", "openrouter", "jev"].map(id => builtinProvider(id, req)),
   ];
-  if (req.big) auto.forEach(p => { if (p.name !== "ollama" && p.name !== "ashna" && p.name !== "jev") p.firstMs = BIG_FIRST_MS; });
+  if (req.big) auto.forEach(p => { if (p.name !== "ollama" && p.name !== "ashna" && p.name !== "openrouter" && p.name !== "jev") p.firstMs = BIG_FIRST_MS; });
   const chosen = req.chosen;
   if (chosen && req.big) chosen.firstMs = BIG_FIRST_MS;
   if (chosen && (chosen.files || !files.length)) {
@@ -415,7 +440,7 @@ async function geminiJson(key, model, system, prompt, timeoutMs = 8000, fetchImp
 }
 
 module.exports = {
-  ENDPOINTS, INSTRUCTION, GEMINI, GROQ, CEREBRAS, DEEPSEEK, REQUEST_BUDGET_MS, BIG_BUDGET_MS, MIN_ATTEMPT_MS, HISTORY_ENTRIES, HISTORY_CHARS, MAX_TOOL_ROUNDS, MAX_TOOL_CALLS,
-  cleanText, cleanMultiline, chatHistory, openAiMessages, geminiParts, systemText, providerFailure, finalAnswer, streamLines, sseData, trimToSentence, headerValue,
+  ENDPOINTS, INSTRUCTION, GEMINI, GROQ, CEREBRAS, CLOUDFLARE, OPENROUTER_FREE, DEEPSEEK, REQUEST_BUDGET_MS, BIG_BUDGET_MS, MIN_ATTEMPT_MS, HISTORY_ENTRIES, HISTORY_CHARS, MAX_TOOL_ROUNDS, MAX_TOOL_CALLS,
+  cleanText, cleanMultiline, chatHistory, openAiMessages, geminiParts, systemText, providerFailure, finalAnswer, providerMessage, streamLines, sseData, trimToSentence, headerValue, cloudflareUrl,
   BUILTIN_IDS, askGemini, askOpenAiCompatible, askAnthropic, noToolsSystem, builtinProvider, generalChatProviders, withFallback, geminiJson,
 };
