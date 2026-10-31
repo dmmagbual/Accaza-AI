@@ -14,9 +14,9 @@ const failure = message => () => Promise.reject(AI.providerFailure(message));
 test("chain order: full access gets 3.8 Flash then Flash-Lite; limited access starts on Flash-Lite", () => {
   const P = tier => AI.generalChatProviders({question: "hi", history: [], keys: {}, tier});
   const full = P("full"), guest = P("guest");
-  assert.equal(full.map(p => p.name).join(">"), "gemini>gemini-lite>groq>cerebras>deepseek>ollama>ashna>jev");
+  assert.equal(full.map(p => p.name).join(">"), "gemini>gemini-lite>groq>cloudflare>deepseek>ollama>ashna>openrouter>jev");
   assert.equal(full[0].model, "gemini-3.8-flash");
-  assert.equal(guest.map(p => p.name).join(">"), "gemini>groq>cerebras>deepseek>ollama>ashna>jev");
+  assert.equal(guest.map(p => p.name).join(">"), "gemini>groq>cloudflare>deepseek>ollama>ashna>openrouter>jev");
   assert.equal(guest[0].model, "gemini-3.5-flash-lite");
   assert.equal(P("limited")[0].model, "gemini-3.5-flash-lite");
 });
@@ -114,6 +114,46 @@ test("OpenRouter JEV is a secret-backed final fallback with the correct model an
     assert.equal(sent[0].headers["X-OpenRouter-Title"], "Accaza AI");
     assert.equal(sent[0].body.model, "typesafe/jev-router");
   } finally { global.fetch = originalFetch; }
+});
+// 1 Nov 2026: Cloudflare Workers AI replaced Cerebras; OpenRouter free models sit before JEV.
+test("Cloudflare needs both the token and a valid account id, and calls the account's OpenAI-compatible URL", async () => {
+  const account = "0123456789abcdef0123456789abcdef";
+  assert.equal(AI.builtinProvider("cloudflare", {question: "q", history: [], keys: {cloudflare: () => "t"}}).enabled(), false);
+  assert.equal(AI.builtinProvider("cloudflare", {question: "q", history: [], keys: {cloudflare: () => "t", cloudflareAccount: () => "not-an-id"}}).enabled(), false);
+  const cf = AI.builtinProvider("cloudflare", {question: "q", history: [], keys: {cloudflare: () => "cf-token\n", cloudflareAccount: () => ` ${account.toUpperCase()}\n`}});
+  assert.equal(cf.enabled(), true);
+  assert.equal(cf.model, "@cf/openai/gpt-oss-120b");
+  assert.equal(AI.builtinProvider("cerebras", {question: "q", history: [], keys: {}}), null, "Cerebras is no longer a chat provider");
+  const originalFetch = global.fetch, sent = [];
+  global.fetch = async (url, init) => { sent.push({url, headers: init.headers, body: JSON.parse(init.body)}); return new Response('data: {"choices":[{"delta":{"content":"CF answer"}}]}\n\ndata: [DONE]\n', {status: 200, headers: {"content-type": "text/event-stream"}}); };
+  try {
+    assert.equal(await cf.ask({firstMs: 1000, totalMs: 12000}, {onDelta: () => {}}), "CF answer");
+    assert.equal(sent[0].url, `https://api.cloudflare.com/client/v4/accounts/${account}/ai/v1/chat/completions`);
+    assert.equal(sent[0].headers.authorization, "Bearer cf-token");
+    assert.equal(sent[0].body.model, "@cf/openai/gpt-oss-120b");
+    assert.equal(sent[0].body.reasoning_effort, "low");
+  } finally { global.fetch = originalFetch; }
+});
+test("OpenRouter free models use the OpenRouter key with a free model list, and are full-access only in the menu", async () => {
+  assert.equal(AI.builtinProvider("openrouter", {question: "q", history: [], keys: {}}).enabled(), false);
+  const or = AI.builtinProvider("openrouter", {question: "q", history: [], keys: {openrouter: () => "or-token"}});
+  const originalFetch = global.fetch, sent = [];
+  global.fetch = async (url, init) => { sent.push({url, headers: init.headers, body: JSON.parse(init.body)}); return new Response('data: {"choices":[{"delta":{"content":"OR answer"}}]}\n\ndata: [DONE]\n', {status: 200, headers: {"content-type": "text/event-stream"}}); };
+  try {
+    assert.equal(await or.ask({firstMs: 1000, totalMs: 12000}, {onDelta: () => {}}), "OR answer");
+    assert.equal(sent[0].url, "https://openrouter.ai/api/v1/chat/completions");
+    assert.equal(sent[0].headers.authorization, "Bearer or-token");
+    assert.ok(sent[0].body.model.endsWith(":free") && sent[0].body.models.length >= 2 && sent[0].body.models.every(m => m.endsWith(":free")), "only free models");
+  } finally { global.fetch = originalFetch; }
+  const M = require("../functions/lib/models");
+  assert.deepEqual(M.BUILTINS.find(m => m.id === "openrouter").tiers, ["owner", "full"]);
+  assert.equal(M.BUILTINS.some(m => m.id === "cerebras"), false);
+});
+test("provider errors keep the provider's own message wherever it is, with the HTTP status", () => {
+  assert.equal(AI.providerMessage({message: "Payment required"}, "fb"), "Payment required");
+  assert.equal(AI.providerMessage({errors: [{code: 10000, message: "Authentication error"}]}, "fb"), "Authentication error");
+  assert.equal(AI.providerMessage({error: {message: "quota"}}, "fb"), "quota");
+  assert.equal(AI.providerMessage({}, "fb"), "fb");
 });
 
 const Chats = require("../functions/lib/chats");
@@ -517,7 +557,7 @@ function modelsDb(docs = {}) {
 test("the model menu depends on the tier and includes shared added models", async () => {
   const db = modelsDb({"models/a1": {label: "GPT", provider: "openai", format: "openai", model: "gpt-x", audience: "everyone", enabled: true}, "models/b2": {label: "Claude", provider: "anthropic", format: "anthropic", model: "c", audience: "owner", enabled: true}});
   const guest = (await Models.menu(db, "guest")).map(m => m.id), owner = (await Models.menu(db, "owner")).map(m => m.id);
-  assert.deepEqual(guest, ["auto", "gemini-lite", "groq", "cerebras", "deepseek", "custom:a1"]);
+  assert.deepEqual(guest, ["auto", "gemini-lite", "groq", "cloudflare", "deepseek", "custom:a1"]);
   assert.ok(owner.includes("gemini") && owner.includes("ollama") && owner.includes("jev") && owner.includes("custom:b2"));
   assert.equal(guest.includes("jev"), false);
 });
@@ -526,6 +566,9 @@ test("limited access cannot pick full-access models; an added model respects its
   await assert.rejects(Models.resolvePick(db, "gemini", "limited", {}, KEY, "d", 1), e => e.code === "permission-denied");
   await assert.rejects(Models.resolvePick(db, "jev", "limited", {}, KEY, "d", 1), e => e.code === "permission-denied");
   assert.equal(await Models.resolvePick(db, "auto", "limited", {}, KEY, "d", 1), null);
+  // A chat remembered on Cerebras (replaced 1 Nov 2026) moves to Cloudflare instead of failing.
+  assert.equal((await Models.resolvePick(db, "cerebras", "limited", {question: "q", history: [], keys: {}}, KEY, "d", 1)).provider.name, "cloudflare");
+  await assert.rejects(Models.resolvePick(db, "openrouter", "limited", {}, KEY, "d", 1), e => e.code === "permission-denied");
   const first = await Models.resolvePick(db, "custom:a1", "limited", {}, KEY, "d", 1);
   assert.equal(first.provider.name, "custom:a1");
   await assert.rejects(Models.resolvePick(db, "custom:a1", "limited", {}, KEY, "d", 2), e => e.code === "resource-exhausted");
@@ -543,12 +586,12 @@ test("an added model is tested before saving, and its key is stored encrypted", 
 test("a picked model goes first; the Auto chain stays behind it without duplicates", () => {
   const req = {question: "q", history: [], keys: {}, tier: "limited"};
   req.chosen = AI.builtinProvider("groq", req);
-  assert.equal(AI.generalChatProviders(req).map(p => p.name).join(">"), "groq>gemini>cerebras>deepseek>ollama>ashna>jev");
+  assert.equal(AI.generalChatProviders(req).map(p => p.name).join(">"), "groq>gemini>cloudflare>deepseek>ollama>ashna>openrouter>jev");
   req.chosen = AI.builtinProvider("gemini-lite", req);
-  assert.equal(AI.generalChatProviders(req).map(p => p.name).join(">"), "gemini-lite>groq>cerebras>deepseek>ollama>ashna>jev");
+  assert.equal(AI.generalChatProviders(req).map(p => p.name).join(">"), "gemini-lite>groq>cloudflare>deepseek>ollama>ashna>openrouter>jev");
   req.chosen = AI.builtinProvider("jev", req);
   const jevFirst = AI.generalChatProviders(req).map(p => p.name);
-  assert.equal(jevFirst.join(">"), "jev>gemini>groq>cerebras>deepseek>ollama>ashna");
+  assert.equal(jevFirst.join(">"), "jev>gemini>groq>cloudflare>deepseek>ollama>ashna>openrouter");
   assert.equal(jevFirst.filter(name => name === "jev").length, 1);
   const withFile = Object.assign({}, req, {files: [{displayName: "a.pdf", mimeType: "application/pdf", uri: "u"}]});
   withFile.chosen = AI.builtinProvider("groq", withFile);

@@ -14,10 +14,11 @@ const BUILTINS = [
   {id: "gemini", label: "Gemini 3.8 Flash", note: "Smartest · reads files", files: true, tools: true, tiers: ["owner", "full"]},
   {id: "gemini-lite", label: "Gemini Flash-Lite", note: "Fast · reads files", files: true, tools: true, tiers: ["owner", "full", "limited", "guest"]},
   {id: "groq", label: "Groq · GPT-OSS 120B", note: "Very fast", files: false, tools: true, tiers: ["owner", "full", "limited", "guest"]},
-  {id: "cerebras", label: "Cerebras · GPT-OSS 120B", note: "Very fast", files: false, tools: true, tiers: ["owner", "full", "limited", "guest"]},
+  {id: "cloudflare", label: "Cloudflare · GPT-OSS 120B", note: "Very fast", files: false, tools: true, tiers: ["owner", "full", "limited", "guest"]},
   {id: "deepseek", label: "DeepSeek", note: "Good at reasoning", files: false, tools: true, tiers: ["owner", "full", "limited", "guest"]},
   {id: "ollama", label: "Qwen 3 (Accaza PC)", note: "Private · slow · PC must be on", files: false, tools: false, tiers: ["owner", "full"]},
   {id: "ashna", label: "Ashna · GLM", note: "Last-resort backup", files: false, tools: false, tiers: ["owner", "full"]},
+  {id: "openrouter", label: "OpenRouter · free models", note: "Free backup · may train on chats", files: false, tools: true, tiers: ["owner", "full"]},
   {id: "jev", label: "JEV Router · OpenRouter", note: "Smart routing · final Auto backup", files: false, tools: true, tiers: ["owner", "full"]},
 ];
 const PROVIDERS = {
@@ -63,8 +64,10 @@ async function menu(db, tier) {
 }
 
 // Resolves the model picked for one message. Returns null for Auto.
+// Chats remember their model in the browser; a chat saved on Cerebras (replaced 1 Nov 2026) moves to Cloudflare.
+const RENAMED = {cerebras: "cloudflare"};
 async function resolvePick(db, pick, tier, req, tokenKey, day, now) {
-  const id = String(pick || "auto");
+  const raw = String(pick || "auto"), id = RENAMED[raw] || raw;
   if (id === "auto") return null;
   if (!id.startsWith("custom:")) {
     const b = BUILTINS.find(m => m.id === id);
