@@ -1,6 +1,7 @@
 "use strict";
 // AI chain for the standalone Accaza AI app (ChatGPT-style, v1.3: memory, tools).
-// Order: Gemini (owner/full access: 3.8 Flash, then Flash-Lite) -> Groq -> Cloudflare -> DeepSeek -> Qwen (Ollama on SUPERDAD) -> Ashna -> OpenRouter (free models) -> JEV Router.
+// Order: Gemini (owner/full access: 3.8 Flash, then Flash-Lite) -> Groq -> Cloudflare -> Qwen (Ollama on SUPERDAD) -> Ashna -> OpenRouter (free models) -> JEV Router.
+// DeepSeek left the chat on 1 Nov 2026 (its secret was deleted on 16 Oct); the laptop worker still lists it.
 // 1 Nov 2026 (Danilo): Cloudflare Workers AI replaced Cerebras in chat (Cerebras prepaid credit ran out,
 // HTTP 402) and OpenRouter free models were added before JEV. The laptop task worker still uses CEREBRAS.
 // Replies stream: each provider pushes text pieces through ctx.onDelta as they arrive. A provider
@@ -340,7 +341,7 @@ function noToolsSystem(req) {
 
 // Built-in providers by id (the ids the model menu uses). files = can read attachments,
 // tools = can use web search / skills / connectors.
-const BUILTIN_IDS = ["gemini", "gemini-lite", "groq", "cloudflare", "deepseek", "ollama", "ashna", "openrouter", "jev"];
+const BUILTIN_IDS = ["gemini", "gemini-lite", "groq", "cloudflare", "ollama", "ashna", "openrouter", "jev"];
 function builtinProvider(id, req) {
   const keys = req.keys || {}, key = name => headerValue(keys[name] ? keys[name]() : "");
   const noTools = Object.assign({}, req, {tools: null, system: noToolsSystem(req)});
@@ -353,7 +354,6 @@ function builtinProvider(id, req) {
       return {name: "cloudflare", model: CLOUDFLARE.model, files: false, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("cloudflare") && account),
         ask: (l, c) => askOpenAiCompatible(Object.assign({}, CLOUDFLARE, {url: cloudflareUrl(account)}), key("cloudflare"), req, l, c)};
     }
-    case "deepseek": return {name: "deepseek", model: DEEPSEEK.model, files: false, tools: true, firstMs: FIRST_TEXT_MS, enabled: () => Boolean(key("deepseek")), ask: (l, c) => askOpenAiCompatible(DEEPSEEK, key("deepseek"), req, l, c)};
     case "ollama": return {name: "ollama", model: "qwen3:8b", files: false, tools: false, firstMs: OLLAMA_FIRST_TEXT_MS, enabled: () => Boolean(key("ollamaId") && key("ollamaSecret")), ask: (l, c) => askOllama(key("ollamaId"), key("ollamaSecret"), req, l, c)};
     // Ashna keeps a reserved slice of the budget so a slow Qwen reply cannot use up the last turn.
     case "ashna": return {name: "ashna", model: ASHNA.model, files: false, tools: false, firstMs: ASHNA_TIMEOUT_MS, reserveMs: ASHNA_TIMEOUT_MS, enabled: () => Boolean(key("ashna")), ask: (l, c) => askOpenAiCompatible(Object.assign({}, ASHNA, {tools: false}), key("ashna"), noTools, l, c)};
@@ -368,7 +368,7 @@ function builtinProvider(id, req) {
 }
 
 // req: {question, history, keys, tier, files?, system?, tools?, chosen?}. "Auto" order: Gemini
-// (owner/full access: 3.8 Flash, then Flash-Lite) -> Groq -> Cloudflare -> DeepSeek -> Qwen -> Ashna ->
+// (owner/full access: 3.8 Flash, then Flash-Lite) -> Groq -> Cloudflare -> Qwen -> Ashna ->
 // OpenRouter (free models) -> JEV Router. With
 // files, a second Gemini attempt always follows the first, because only Gemini can read them.
 // req.chosen (a provider object from the model menu) goes first, unless files are attached and
@@ -380,7 +380,7 @@ function generalChatProviders(req) {
   const auto = [
     Object.assign({}, first, {name: "gemini"}),
     ...(strong || files.length ? [builtinProvider("gemini-lite", req)] : []),
-    ...["groq", "cloudflare", "deepseek", "ollama", "ashna", "openrouter", "jev"].map(id => builtinProvider(id, req)),
+    ...["groq", "cloudflare", "ollama", "ashna", "openrouter", "jev"].map(id => builtinProvider(id, req)),
   ];
   if (req.big) auto.forEach(p => { if (p.name !== "ollama" && p.name !== "ashna" && p.name !== "openrouter" && p.name !== "jev") p.firstMs = BIG_FIRST_MS; });
   const chosen = req.chosen;
