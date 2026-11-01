@@ -11,6 +11,8 @@ const {HttpsError} = require("firebase-functions/v2/https");
 const CONTEXT_MESSAGES = 40;
 const LIST_CHATS = 100;
 const LIST_MESSAGES = 300;
+const SEARCH_CHATS = 30;
+const SEARCH_MESSAGES = 200;
 
 function chatsRef(db, uid) { return db.collection("users").doc(uid).collection("chats"); }
 function cleanId(value) {
@@ -20,6 +22,10 @@ function cleanId(value) {
 function titleFrom(text) {
   const line = String(text || "").replace(/\s+/g, " ").trim();
   return line.length > 60 ? line.slice(0, 57).trimEnd() + "…" : line || "New chat";
+}
+function snippet(text, at, length) {
+  const start = Math.max(0, at - 40), end = Math.min(text.length, at + length + 70);
+  return (start > 0 ? "…" : "") + text.slice(start, end).replace(/\s+/g, " ").trim() + (end < text.length ? "…" : "");
 }
 async function requireChat(db, uid, chatId) {
   const id = cleanId(chatId);
@@ -76,7 +82,45 @@ async function listChats(db, uid) {
 async function listMessages(db, uid, chatId) {
   const {ref, data} = await requireChat(db, uid, chatId);
   const snap = await ref.collection("messages").orderBy("at", "desc").limit(LIST_MESSAGES).get();
-  return {chat: {id: ref.id, title: data.title || "New chat"}, messages: snap.docs.map(doc => { const m = doc.data(); return {id: doc.id, role: m.role, text: m.text || "", at: m.at || 0, attachments: (m.attachments || []).map(f => ({id: f.id, displayName: f.displayName, mimeType: f.mimeType, expiresAt: f.expiresAt})), sources: m.sources || [], canvas: m.canvas || null, task: m.task || null, taskFiles: m.taskFiles || []}; }).reverse()};
+  return {chat: {id: ref.id, title: data.title || "New chat"}, messages: snap.docs.map(doc => { const m = doc.data(); return {id: doc.id, role: m.role, text: m.text || "", at: m.at || 0, feedback: m.feedback || "", attachments: (m.attachments || []).map(f => ({id: f.id, displayName: f.displayName, mimeType: f.mimeType, expiresAt: f.expiresAt})), sources: m.sources || [], canvas: m.canvas || null, task: m.task || null, taskFiles: m.taskFiles || []}; }).reverse()};
+}
+// Chat search (ChatGPT-style sidebar search): title and message text, within the caller's own
+// chats only. Recent chats are scanned newest first, and only the first matching message of each
+// chat is returned, so the answer stays small.
+async function searchChats(db, uid, query) {
+  const term = String(query || "").replace(/\s+/g, " ").trim().slice(0, 80);
+  if (term.length < 2) throw new HttpsError("invalid-argument", "Type at least two characters to search.");
+  const needle = term.toLowerCase();
+  const chatsSnap = await chatsRef(db, uid).orderBy("updatedAt", "desc").limit(SEARCH_CHATS).get();
+  const rows = await Promise.all(chatsSnap.docs.map(async chatDoc => {
+    const title = chatDoc.data().title || "New chat", base = {id: chatDoc.id, title, updatedAt: chatDoc.data().updatedAt || 0, titleMatch: title.toLowerCase().includes(needle)};
+    const snap = await chatDoc.ref.collection("messages").orderBy("at", "desc").limit(SEARCH_MESSAGES).get();
+    for (const message of snap.docs) {
+      const text = String(message.data().text || ""), at = text.toLowerCase().indexOf(needle);
+      if (at === -1) continue;
+      return Object.assign(base, {match: {messageId: message.id, role: message.data().role, at: message.data().at || 0, snippet: snippet(text, at, needle.length)}});
+    }
+    return base.titleMatch ? Object.assign(base, {match: null}) : null;
+  }));
+  return {query: term, results: rows.filter(Boolean).slice(0, 20)};
+}
+
+// Thumbs up/down on an answer. The message keeps its own rating (so it shows again when the chat
+// is reopened) and an analytics row is written for the owner; clearing a rating deletes that row.
+async function saveFeedback(db, uid, data, now, tier) {
+  const chat = await requireChat(db, uid, data.chatId);
+  const messageId = cleanId(data.messageId);
+  if (!messageId) throw new HttpsError("invalid-argument", "That answer was not found.");
+  const ref = chat.ref.collection("messages").doc(messageId), snap = await ref.get();
+  if (!snap.exists || snap.data().role !== "model") throw new HttpsError("not-found", "That answer was not found.");
+  const value = data.value === "up" || data.value === "down" ? data.value : "";
+  const logRef = db.collection("feedback").doc(`${uid}_${messageId}`);
+  const batch = db.batch();
+  batch.set(ref, {feedback: value, feedbackAt: value ? now : null}, {merge: true});
+  if (value) batch.set(logRef, {at: now, day: new Date(now).toISOString().slice(0, 10), uid, tier, chatId: chat.ref.id, messageId, value, provider: snap.data().provider || ""});
+  else batch.delete(logRef);
+  await batch.commit();
+  return {messageId, value};
 }
 async function renameChat(db, uid, chatId, title) {
   const {ref} = await requireChat(db, uid, chatId);
@@ -99,4 +143,4 @@ async function deleteAllChats(db, uid) {
 }
 
 function newChatId(db, uid) { return chatsRef(db, uid).doc().id; }
-module.exports = {newChatId, CONTEXT_MESSAGES, cleanId, titleFrom, requireChat, recentMessages, planTurn, saveTurn, listChats, listMessages, renameChat, deleteChat, deleteAllChats};
+module.exports = {newChatId, CONTEXT_MESSAGES, SEARCH_CHATS, SEARCH_MESSAGES, cleanId, titleFrom, snippet, requireChat, recentMessages, planTurn, saveTurn, listChats, listMessages, searchChats, saveFeedback, renameChat, deleteChat, deleteAllChats};

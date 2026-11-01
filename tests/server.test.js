@@ -404,6 +404,133 @@ test("tool sets combine; unknown tools answer with an error instead of throwing"
   assert.equal(combineTools([null]), null);
 });
 
+// ---------- Install from a link ----------
+const Install = require("../functions/lib/install");
+test("a GitHub link becomes the right download: repo zipball, branch folder, or raw file", () => {
+  assert.deepEqual(Install.sourceUrl("https://github.com/acme/skills"), {url: "https://codeload.github.com/acme/skills/zip/HEAD", subpath: "", label: "acme/skills"});
+  assert.deepEqual(Install.sourceUrl("https://github.com/acme/skills/tree/main/skills/barista"), {url: "https://codeload.github.com/acme/skills/zip/refs/heads/main", subpath: "skills/barista", label: "acme/skills"});
+  assert.equal(Install.sourceUrl("https://github.com/acme/skills/blob/main/SKILL.md").url, "https://raw.githubusercontent.com/acme/skills/main/SKILL.md");
+  assert.equal(Install.sourceUrl("https://example.com/skill.zip").url, "https://example.com/skill.zip");
+  assert.throws(() => Install.sourceUrl("file:///etc/passwd"), e => e.code === "invalid-argument");
+});
+test("a plugin .zip installs the skills its plugin.json declares", () => {
+  const zip = zipSync({
+    ".claude-plugin/plugin.json": strToU8(JSON.stringify({name: "Cafe pack", description: "Coffee ops", version: "1.2", skills: ["./skills/barista"], mcpServers: {toast: {url: "https://mcp.example.com"}}})),
+    "skills/barista/SKILL.md": strToU8("---\nname: Barista\ndescription: Espresso dial-in\n---\nDial in the grinder."),
+    "skills/barista/references/recipes.md": strToU8("# Latte\n18 g in, 36 g out"),
+    "skills/barista/scripts/run.py": strToU8("print(1)"),
+    "skills/roaster/SKILL.md": strToU8("---\nname: Roaster\ndescription: Roast profiles\n---\nRoast."),
+  });
+  const pkg = Install.packageFromEntries(Install.readArchive(Buffer.from(zip)));
+  assert.equal(pkg.kind, "plugin");
+  assert.equal(pkg.plugin.name, "Cafe pack");
+  assert.deepEqual(pkg.plugin.mcpServers, ["toast"]);
+  assert.deepEqual(pkg.skills.map(s => s.name), ["Barista"]);
+  assert.deepEqual(pkg.skills[0].files.map(f => f.name), ["references/recipes.md"]);
+  assert.match(pkg.notes.join(" "), /run\.py/);
+});
+test("a repo .zip with no manifest installs every SKILL.md it holds", () => {
+  const zip = zipSync({"repo-main/skills/barista/SKILL.md": strToU8("---\nname: Barista\ndescription: Bar SOP\n---\nSteps."), "repo-main/skills/roaster/SKILL.md": strToU8("---\nname: Roaster\ndescription: Roast SOP\n---\nSteps."), "repo-main/README.md": strToU8("hello")});
+  const pkg = Install.packageFromEntries(Install.readArchive(Buffer.from(zip)));
+  assert.equal(pkg.kind, "plugin");
+  assert.deepEqual(pkg.skills.map(s => s.name), ["Barista", "Roaster"]);
+  assert.deepEqual(pkg.skills[0].files, []);
+});
+test("a folder inside a repo zip installs only that skill", () => {
+  const zip = zipSync({"repo-main/skills/barista/SKILL.md": strToU8("---\nname: Barista\ndescription: Bar SOP\n---\nSteps."), "repo-main/skills/roaster/SKILL.md": strToU8("---\nname: Roaster\ndescription: Roast SOP\n---\nSteps.")});
+  const pkg = Install.packageFromEntries(Install.onlyUnder(Install.readArchive(Buffer.from(zip)), "skills/barista"));
+  assert.equal(pkg.kind, "skill");
+  assert.deepEqual(pkg.skills.map(s => s.name), ["Barista"]);
+});
+test("a raw SKILL.md link installs one skill; a web page or a missing file is refused", async () => {
+  const md = "---\nname: Barista\ndescription: Espresso dial-in\n---\nDial in the grinder.";
+  const pkg = await Install.loadPackage("https://example.com/SKILL.md", {fetchImpl: async () => ({status: 200, contentType: "text/markdown", text: md, bytes: Buffer.from(md)})});
+  assert.equal(pkg.kind, "skill");
+  assert.equal(pkg.skills[0].name, "Barista");
+  assert.equal(pkg.skills[0].instructions, "Dial in the grinder.");
+  const page = "<!doctype html><html><body>hi</body></html>";
+  await assert.rejects(Install.loadPackage("https://example.com/skill", {fetchImpl: async () => ({status: 200, contentType: "text/html", text: page, bytes: Buffer.from(page)})}), e => e.code === "invalid-argument" && /web page/.test(e.message));
+  await assert.rejects(Install.loadPackage("https://example.com/x.zip", {fetchImpl: async () => ({status: 404, text: "", bytes: Buffer.alloc(0)})}), e => /HTTP 404/.test(e.message));
+});
+
+test("an installed skill remembers where it came from, including its catalogue pack", () => {
+  const pub = Skills.publicSkill("s1", {name: "Barista", description: "d", ownerUid: "u", source: {kind: "catalog", template: "small-business", plugin: "Small-business pack"}}, {uid: "u"});
+  assert.deepEqual(pub.from, {kind: "catalog", template: "small-business", plugin: "Small-business pack", url: ""});
+  assert.equal(Skills.publicSkill("s2", {name: "x", description: "y", ownerUid: "u"}, {uid: "u"}).from, null);
+});
+
+// ---------- Chat search and feedback ----------
+test("chat search finds message text and title-only matches, and refuses one-character queries", async () => {
+  const chats = [
+    {id: "c1", title: "Coffee prices", updatedAt: 5, messages: [{id: "m1", role: "user", text: "What did the supplier say about the new price list?", at: 4}, {id: "m2", role: "model", text: "The supplier quoted 320 per kg.", at: 5}]},
+    {id: "c2", title: "Roast plan", updatedAt: 3, messages: [{id: "m3", role: "model", text: "Nothing relevant here.", at: 3}]},
+  ];
+  const docs = chats.map(c => ({id: c.id, data: () => ({title: c.title, updatedAt: c.updatedAt}), ref: {collection: () => ({orderBy: () => ({limit: () => ({get: async () => ({docs: c.messages.map(m => ({id: m.id, data: () => m}))})})})})}}));
+  const db = {collection: () => ({doc: () => ({collection: () => ({orderBy: () => ({limit: () => ({get: async () => ({docs})})})})})})};
+  const found = await Chats.searchChats(db, "u", "supplier");
+  assert.equal(found.query, "supplier");
+  assert.deepEqual(found.results.map(r => r.id), ["c1"]);
+  assert.match(found.results[0].match.snippet, /supplier/);
+  const byTitle = await Chats.searchChats(db, "u", "roast");
+  assert.equal(byTitle.results[0].id, "c2");
+  assert.equal(byTitle.results[0].match, null);
+  assert.equal((await Chats.searchChats(db, "u", "NOTHING")).results[0].id, "c2");
+  await assert.rejects(Chats.searchChats(db, "u", "q"), e => e.code === "invalid-argument");
+});
+test("feedback rates the caller's own answers, ignores questions, and can be cleared", async () => {
+  const writes = [], messages = {m2: {role: "model", text: "a", provider: "gemini"}, m1: {role: "user", text: "q"}};
+  const chatRef = {id: "c1", collection: () => ({doc: id => ({get: async () => ({exists: Boolean(messages[id]), data: () => messages[id]}), set: v => writes.push({message: id, v})})})};
+  const db = {
+    collection: name => name === "users"
+      ? {doc: () => ({collection: () => ({doc: () => ({id: "c1", collection: chatRef.collection, get: async () => ({exists: true, data: () => ({title: "Chat"})})})})})}
+      : {doc: id => ({id, set: v => writes.push({log: id, v}), delete: () => writes.push({logDeleted: id})})},
+    batch: () => ({set: (ref, v) => writes.push({batch: v}), delete: () => writes.push({batchDeleted: true}), commit: async () => {}}),
+  };
+  assert.deepEqual(await Chats.saveFeedback(db, "u", {chatId: "c1", messageId: "m2", value: "up"}, 1000, "full"), {messageId: "m2", value: "up"});
+  assert.ok(writes.some(w => w.batch && w.batch.feedback === "up"));
+  assert.ok(writes.some(w => w.batch && w.batch.messageId === "m2" && w.batch.value === "up" && w.batch.provider === "gemini"));
+  await assert.rejects(Chats.saveFeedback(db, "u", {chatId: "c1", messageId: "m1", value: "up"}, 1, "full"), e => e.code === "not-found");
+  assert.equal((await Chats.saveFeedback(db, "u", {chatId: "c1", messageId: "m2", value: "meh"}, 2, "full")).value, "");
+  assert.ok(writes.some(w => w.batchDeleted === true));
+});
+
+// ---------- Browse catalogue ----------
+const Catalog = require("../functions/lib/catalog");
+test("every catalogue entry is complete, within limits and has a unique id", () => {
+  const ids = Catalog.TEMPLATES.map(t => t.id);
+  assert.equal(new Set(ids).size, ids.length);
+  for (const t of Catalog.TEMPLATES) {
+    assert.match(t.id, /^[a-z0-9-]+$/, t.id);
+    assert.ok(t.name && t.name.length <= 60, t.id);
+    assert.ok(t.description && t.description.length <= 400, t.id);
+    assert.ok(t.category && t.emoji, t.id);
+    assert.ok(["skill", "plugin"].includes(t.kind), t.id);
+    for (const skill of Catalog.templateSkills(t)) {
+      assert.ok(skill.name && skill.name.length <= 60, t.id);
+      assert.ok(skill.description && skill.description.length <= 400, t.id);
+      assert.ok(skill.instructions.length > 80 && skill.instructions.length <= Skills.LIMITS.instructions, t.id);
+      assert.deepEqual(skill.files, []);
+    }
+  }
+});
+test("the catalogue lists packs, finds them by id, and expands a pack into its skills", () => {
+  const list = Catalog.listTemplates();
+  assert.equal(list.length, Catalog.TEMPLATES.length);
+  assert.ok(list.every(t => t.skillCount >= 1 && t.skills.length === t.skillCount));
+  assert.equal(Catalog.findTemplate("email-writer").name, "Email writer");
+  assert.equal(Catalog.findTemplate("Email-Writer").id, "email-writer");
+  assert.equal(Catalog.findTemplate("nope"), undefined);
+  const pack = Catalog.templateSkills(Catalog.findTemplate("small-business"));
+  assert.deepEqual(pack.map(s => s.name), ["Quote & invoice writer", "Customer replies", "Reorder & stock list"]);
+});
+test("the chat install tool declares one tool, labels it, and reports failures instead of throwing", async () => {
+  const tool = Install.installTool({db: null, key: "k", actor: {uid: "u", tier: "owner"}, now: 1, options: {fetchImpl: async () => ({status: 404, text: "", bytes: Buffer.alloc(0)})}});
+  assert.deepEqual(tool.declarations.map(d => d.name), ["install_skill"]);
+  assert.match(tool.labels.install_skill({url: "https://github.com/acme/skills"}), /acme\/skills/);
+  assert.match((await tool.run("install_skill", {url: "https://example.com/x.zip"})).error, /HTTP 404/);
+  assert.deepEqual(await tool.run("other", {}), {error: "Unknown tool."});
+});
+
 // ---------- Web search ----------
 const Net = require("../functions/lib/netguard");
 const Web = require("../functions/lib/websearch");

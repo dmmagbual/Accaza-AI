@@ -24,6 +24,9 @@ Live at **https://accaza-ai.web.app**.
   - Settings → Memory lists every memory, with delete and delete all.
 - **Skills** (registered users), like Claude Skills or custom GPTs: a name, a "when to use" description, instructions, and reference files (.md/.txt/.csv/.json/.pdf).
   - Claude-style skill **.zip** or **SKILL.md** files can be imported. Front matter gives the name and description, and scripts are skipped.
+  - **Browse and install**: the Skills page opens with Browse, a grid of ready-made skills and packs (email, social captions, meeting notes, project plans, study coach, code review, spreadsheets, and a small-business pack of quotes, customer replies and reorder lists). One tap installs one, and installing again refreshes it. Search filters the grid.
+  - **Install from a link**: Skills → "Install from a link" takes a GitHub repo or folder, a skill `.zip`, or a raw `SKILL.md`. A plugin package (`.claude-plugin/plugin.json` or `plugin.json`) installs every skill it declares, and installing the same link again updates it in place. Links go through the SSRF guard, size is capped at 25 MB, scripts are skipped, and a plugin's MCP servers are only listed (add them yourself under Connectors).
+  - **In chat**: the assistant can install a link you paste ("install this skill: …") with the `install_skill` tool. It only does that when you ask for that link, and the new skill applies from your next message.
   - Files are read once (PDFs through Gemini), chunked and embedded with `gemini-embedding-001` (768-d), and searched with Firestore vector search.
   - In chat, the AI sees the skill catalogue and calls `read_skill` / `search_skill` tools. Typing **/** pins a skill for the message.
   - The owner can share a skill with everyone. Limited users can create up to 5 skills; full-access users 50.
@@ -50,6 +53,7 @@ Live at **https://accaza-ai.web.app**.
   - Each added model is tested before it's saved. The key is stored AES-256-GCM encrypted in `models/{id}`.
   - Each has an audience (only me / full access / everyone) and an optional daily cap (`modelUsage/{day}`).
 - **Saved chats** in a sidebar for all registered users, with rename, delete and delete all. Guests' chats stay in their browser tab only.
+- **ChatGPT-style chat functions**: search chats from the sidebar (titles and message text across the 30 most recent chats, with the matching snippet); 👍/👎 on any answer, kept with the message and logged in `feedback/{uid}_{messageId}`; 🔊 **Read aloud** with the browser's voice; 🎤 **dictation** in the message box where the browser supports it; and four starter prompts on the empty screen.
 - **Account access** (owner only), under Settings → Access:
   - Every verified registration starts with limited access.
   - The owner can grant full access or return an account to limited access; changes are audit logged.
@@ -105,6 +109,8 @@ Cowork-style tasks run on the owner's laptop (SUPERDAD), not in Cloud Functions.
 - `functions/lib/files.js`: attachment checks, the upload cap, the Gemini Files API, owner-bound resolution.
 - `functions/lib/memory.js`: settings, memories, extraction, sensitive-data filter.
 - `functions/lib/skills.js` and `functions/lib/tools.js`: skill storage, ingestion, retrieval tools, and the tool combiner.
+- `functions/lib/install.js`: installs a skill or a plugin from a link (GitHub repo or folder, `.zip`, raw `SKILL.md`), plus the one-tap catalogue install and the chat `install_skill` tool.
+- `functions/lib/catalog.js`: the built-in Browse catalogue (ready-made skills and packs).
 - `functions/lib/websearch.js` and `functions/lib/netguard.js`: web tools and the safe fetch.
 - `functions/lib/google.js`, `functions/lib/mcp.js` and `functions/lib/crypto.js`: connectors and token encryption.
 - `functions/lib/models.js`: model menu, added models, test-before-save, caps.
@@ -121,7 +127,7 @@ Cowork-style tasks run on the owner's laptop (SUPERDAD), not in Cloud Functions.
 - `users/{uid}`: email, name, `accessLevel` (`full`/`limited`), legacy compatibility fields, and access-change audit stamps.
 - `users/{uid}/chats/{chatId}` and `.../messages/{id}`: saved chats. Only the server reads or writes them, always under the caller's own uid.
 - `users/{uid}/settings/profile` and `users/{uid}/memories/{id}`: personalisation and memory.
-- `skills/{id}` and `skills/{id}/chunks/{id}` (vector index on `embedding`, defined in `firestore.indexes.json`): skills.
+- `skills/{id}` and `skills/{id}/chunks/{id}` (vector index on `embedding`, defined in `firestore.indexes.json`): skills; `source` records the link a skill was installed from.
 - `uploads/{id}` (TTL `expireAt`) and `uploadUsage/{day}`: attachments and the daily upload cap.
 - `searchUsage/{day}`: web search caps.
 - `users/{uid}/connectors/{google|mcp_*}` and `oauthStates/{state}`: connectors (tokens encrypted) and one-time OAuth states.
@@ -131,6 +137,7 @@ Cowork-style tasks run on the owner's laptop (SUPERDAD), not in Cloud Functions.
 - `sites/{slug}` and `siteAssets/{id}`: published pages (built HTML) and site photos.
 - `usage/{day}`: per-person and total message counts for limited users and guests (Manila day).
 - `chatLog/{id}`: analytics (who asked, which AI answered, and a SHA-256 hash of the question). The question text is not stored here.
+- `feedback/{uid}_{messageId}`: one row per thumbs up/down (who, which chat and message, the rating, and the provider that answered).
 - `providerHealth/{day}`: backup answers and provider failures.
 - `adminLog/{id}`: full/limited access changes.
 
