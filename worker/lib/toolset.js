@@ -2,6 +2,7 @@
 // Tools a laptop task can use. Code and file tools act inside the Docker sandbox; web tools and
 // skills reuse the chat's own implementations (functions/lib), so caps and SSRF guards match.
 const {clip} = require("./sandbox");
+const HostGit = require("./hostgit");
 
 const MAX_WRITE_CHARS = 400000;
 const CODE_TIMEOUT = {default: 120, max: 600};
@@ -21,6 +22,10 @@ const DECLARATIONS = [
     parameters: {type: "object", properties: {path: {type: "string"}}}},
   {name: "ask_user", description: "Ask the user a question and pause until they answer. Only use this when you cannot continue without a decision or a fact only they have; otherwise make a sensible assumption, state it, and carry on.",
     parameters: {type: "object", properties: {question: {type: "string"}}, required: ["question"]}},
+  {name: "git_status", description: "Show the git state of a shared folder on the laptop: path, branch, remotes and uncommitted changes. Use it before publishing anything. The sandbox itself has no internet, so this runs on the laptop.",
+    parameters: {type: "object", properties: {folder: {type: "string", description: "Shared folder, or a folder inside it, e.g. \"projects/Accaza AI\". Optional when only one folder is writable."}}}},
+  {name: "git_publish", description: "Commit work in a writable shared folder and push it to GitHub. Runs on the laptop with your own git credentials, because the sandbox has no internet. Stages everything in the repository (or just the paths you list), commits with your message and pushes to origin. Never forces.",
+    parameters: {type: "object", properties: {folder: {type: "string", description: "Writable shared folder that holds the repo, or a folder inside it (e.g. \"projects/Accaza AI\")."}, message: {type: "string", description: "Commit message."}, paths: {type: "array", items: {type: "string"}, description: "Optional paths to stage, relative to the repository root."}, branch: {type: "string", description: "Optional branch to push to, e.g. feature/login."}}, required: ["message"]}},
 ];
 
 function firstLine(text, max = 90) { return String(text || "").split("\n").map(s => s.trim()).find(Boolean)?.slice(0, max) || ""; }
@@ -36,6 +41,8 @@ function labelFor(name, args, extraLabel) {
     case "read_file": return `Reading ${shortPath(a.path)}`;
     case "list_files": return `Listing ${shortPath(a.path || "/workspace")}`;
     case "ask_user": return "Asked you a question";
+    case "git_status": return `Checking git state of ${a.folder || "the shared folder"}`;
+    case "git_publish": return `Pushing to GitHub: ${firstLine(a.message, 60)}`;
     default: return extraLabel ? extraLabel(name, a) : name.replace(/_/g, " ");
   }
 }
@@ -49,12 +56,14 @@ function detailFor(name, args, result) {
     case "write_file": return `${r.bytes || 0} bytes`;
     case "list_files": return clip((r.files || []).map(f => `${shortPath(f.path)} (${f.size} B)`).join("\n"), 1500);
     case "web_search": return clip(r.summary || "", 1200);
+    case "git_status": return clip(r.text || "", 1200);
+    case "git_publish": return clip(r.text || "", 1500);
     default: return "";
   }
 }
 
 // ctx: {sandbox, webTools, skillTools, onPlan(steps)}. Returns {declarations, run, label, detail}.
-function buildTools({sandbox, webTools, skillTools, onPlan}) {
+function buildTools({sandbox, webTools, skillTools, onPlan, gitFolders}) {
   const extra = [webTools, skillTools].filter(t => t && t.declarations && t.declarations.length);
   const extraOwner = new Map();
   extra.forEach(set => set.declarations.forEach(d => { if (!extraOwner.has(d.name)) extraOwner.set(d.name, set); }));
@@ -79,6 +88,8 @@ function buildTools({sandbox, webTools, skillTools, onPlan}) {
         }
         case "read_file": return await sandbox.readFile(a.path);
         case "list_files": return await sandbox.listFiles(a.path);
+        case "git_status": return await HostGit.status(gitFolders, a);
+        case "git_publish": return await HostGit.publish(gitFolders, a);
         default: {
           const set = extraOwner.get(name);
           if (!set) return {error: `Unknown tool ${String(name).slice(0, 40)}.`};

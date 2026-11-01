@@ -26,7 +26,10 @@ const {getStorage} = require("firebase-admin/storage");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.15";
+// Shown in the sidebar footer (see /index.html whoLine). Bump with every release, and set
+// RELEASE_BUILD to the deploy date so a stale deploy is visible at a glance.
+const RELEASE_VERSION = "1.16";
+const RELEASE_BUILD = "2026-11-01";
 const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
@@ -259,7 +262,7 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
   if (action === "me") {
     if (Access.isAnonymous(auth)) {
       const used = await Access.usedToday(db, auth.uid, day);
-      return {tier: "guest", emailVerified: false, limit: Access.DAILY_LIMIT, remaining: Math.max(0, Access.DAILY_LIMIT - used), version: RELEASE_VERSION};
+      return {tier: "guest", emailVerified: false, limit: Access.DAILY_LIMIT, remaining: Math.max(0, Access.DAILY_LIMIT - used), version: RELEASE_VERSION, build: RELEASE_BUILD};
     }
     const email = Access.normalEmail(auth.token && auth.token.email), verified = auth.token && auth.token.email_verified === true;
     const ref = db.collection("users").doc(auth.uid), snap = await ref.get(), user = snap.exists ? snap.data() : null;
@@ -272,11 +275,11 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
       else if (!owner && !["full", "limited"].includes(user.accessLevel)) patch.accessLevel = Access.userAccessLevel(user);
       await ref.set(patch, {merge: true});
     }
-    if (!verified) return {tier: "unverified", emailVerified: false, email, name, version: RELEASE_VERSION};
+    if (!verified) return {tier: "unverified", emailVerified: false, email, name, version: RELEASE_VERSION, build: RELEASE_BUILD};
     const account = await Access.resolveAccount(db, auth);
-    if (Access.unlimited(account.tier)) return {tier: account.tier, emailVerified: true, email, name, limit: null, remaining: null, model: AI.GEMINI.strong.model, version: RELEASE_VERSION};
+    if (Access.unlimited(account.tier)) return {tier: account.tier, emailVerified: true, email, name, limit: null, remaining: null, model: AI.GEMINI.strong.model, version: RELEASE_VERSION, build: RELEASE_BUILD};
     const used = await Access.usedToday(db, auth.uid, day);
-    return {tier: account.tier, emailVerified: true, email, name, limit: Access.DAILY_LIMIT, remaining: Math.max(0, Access.DAILY_LIMIT - used), version: RELEASE_VERSION};
+    return {tier: account.tier, emailVerified: true, email, name, limit: Access.DAILY_LIMIT, remaining: Math.max(0, Access.DAILY_LIMIT - used), version: RELEASE_VERSION, build: RELEASE_BUILD};
   }
   const actor = await Access.resolveAccount(db, auth);
   // Saved chats: any registered, verified account, always scoped to the caller's own uid.

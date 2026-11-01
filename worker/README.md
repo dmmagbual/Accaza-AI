@@ -29,6 +29,7 @@ Laptop: worker/index.js  --------------------------------+   Storage, Secret Man
 - The worker's service account (`laptop-worker@accaza-ai`) can only reach Firestore, the task files bucket and 4 secrets (Gemini, web search, DeepSeek, Cerebras). API keys stay in memory and are never written to disk.
 - Only the owner can create tasks (the `tasks` callable), and the worker refuses tasks from any other uid.
 - Shared folders can only be set in `config.json` on the laptop, never from the web app.
+- `git_status` and `git_publish` run **on the laptop**, outside the container, because the sandbox has no network and could never reach github.com. They only accept folders marked `"write": true`, use fixed commands (no string from the AI is ever executed), never force-push, and authenticate with the laptop's own git credentials. No key from Secret Manager is involved.
 
 ## Setup (once)
 
@@ -51,6 +52,7 @@ Keep the data folder outside AppData. The Claude desktop app (and other Microsof
 | Queue a task from the laptop | `node worker\scripts\enqueue.js "what to do" [file …]` |
 | Inspect a task | `node worker\scripts\task-status.js [taskId] [-v]` |
 | Share a folder | Add `{"name": "Reports", "path": "C:\\…\\Reports", "write": false}` to `folders` in `config.json`, then restart the worker |
+| Publish work to GitHub | In a task, ask it to build in a writable folder and push: it writes files into `/mnt/<folder>`, then `git_publish` commits and pushes from the laptop. One shared folder can hold several repos — address one as `"projects/Accaza AI"` |
 | Restart the worker | `Stop-ScheduledTask "Accaza AI laptop worker"; Start-ScheduledTask "Accaza AI laptop worker"` |
 | Change sandbox libraries | Edit `sandbox/requirements.txt`, bump `IMAGE` in `lib/sandbox.js` (e.g. `accaza-sandbox:2`), restart. The worker builds the new image. |
 | Rotate the key | `gcloud iam service-accounts keys list --iam-account laptop-worker@accaza-ai.iam.gserviceaccount.com`, create a new one, delete the old one |
