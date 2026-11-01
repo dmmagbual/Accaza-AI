@@ -28,7 +28,7 @@ initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
 // Shown in the sidebar footer (see /index.html whoLine). Bump with every release, and set
 // RELEASE_BUILD to the deploy date so a stale deploy is visible at a glance.
-const RELEASE_VERSION = "1.16";
+const RELEASE_VERSION = "1.17";
 const RELEASE_BUILD = "2026-11-01";
 const QUESTION_CHARS = 4000;
 

@@ -79,7 +79,7 @@ Cowork-style tasks run on the owner's laptop (SUPERDAD), not in Cloud Functions.
 
 - Turn on **⚙ Task** in the chat box, describe the job and optionally attach files (PDF, images, CSV, Excel, Word, PowerPoint, text, JSON, zip; up to 5 files, 10 MB each, 15 MB in total).
 - The laptop worker plans the job, then writes and runs code in a Docker sandbox that has no network. It builds Word, Excel, PowerPoint and PDF files and charts, researches with `web_search`/`open_url`, can use your skills, checks its work, and delivers the files in `outputs/`.
-- The task card in the chat shows the plan checklist, a live activity log (with code and output), any question from the task (it pauses until you answer), **Stop**, and **Download** for each file. **Tasks** in the sidebar lists every task, shows whether the laptop is online, and lets you delete finished tasks.
+- The task card in the chat shows the plan checklist, a live activity log (with code and output), any question from the task (it pauses until you answer), **Stop**, and **Download** for each file. **Tasks** under Settings → App lists every task, shows whether the laptop is online, and lets you delete finished tasks.
 - Tasks in the same chat share one workspace, so a follow-up task can build on earlier files.
 - When the laptop is off, tasks wait in the queue and start once it is back online.
 - Deleting a chat, or all chats, also deletes its tasks and their files. Task files are also deleted automatically after 90 days.
@@ -164,7 +164,7 @@ firebase functions:secrets:set OPENROUTER_API_KEY --project accaza-ai
 
 ## Test and deploy
 
-Pushing to `main` deploys automatically (`.github/workflows/deploy.yml`). The login is keyless: GitHub OIDC uses Workload Identity Federation to act as the `github-deploy@accaza-ai` service account, and it only accepts `dmmagbual/Accaza-AI` on `main`. Pull requests run the tests only. After deploying, the workflow loads the live site and fails the run if the app shell is missing, and the app's sidebar footer shows the release version it is running (`v1.16 · 2026-11-01`), so a stale deploy is visible at a glance.
+Pushing to `main` deploys automatically (`.github/workflows/deploy.yml`). The login is keyless: GitHub OIDC uses Workload Identity Federation to act as the `github-deploy@accaza-ai` service account, and it only accepts `dmmagbual/Accaza-AI` on `main`. Pull requests run the tests only. After deploying, the workflow loads the live site and fails the run if the app shell is missing, and the app's sidebar footer shows the release version it is running (`v1.17 · 2026-11-01`), so a stale deploy is visible at a glance.
 
 To test locally, or deploy by hand in an emergency:
 

@@ -314,12 +314,7 @@
     <div id="sideFoot">
       <div class="who" id="whoLine">© 2026 Accaza AI</div>
       <div class="row">
-        <button id="canvasesBtn" type="button" style="display:none">Canvases</button>
-        <button id="tasksBtn" type="button" style="display:none">Tasks</button>
-        <button id="skillsBtn" type="button" style="display:none">Skills</button>
-        <button id="settingsBtn" type="button" style="display:none">Settings</button>
-        <button id="themeBtn" type="button">Theme: auto</button>
-        <button id="deleteAllBtn" type="button" style="display:none">Delete all chats</button>
+        <button id="settingsBtn" type="button">⚙ Settings</button>
       </div>
     </div>
   </aside>
@@ -451,7 +446,7 @@
   <div id="settingsWrap">
     <div id="settingsInner">
       <h2>Settings</h2>
-      <div class="tabs"><button type="button" id="tabPersonal" class="on">Personalise</button><button type="button" id="tabMemory">Memory</button><button type="button" id="tabAccess" style="display:none">Access</button><button type="button" id="tabConnectors" style="display:none">Connectors</button><button type="button" id="tabModels" style="display:none">Models</button></div>
+      <div class="tabs"><button type="button" id="tabPersonal" class="on">Personalise</button><button type="button" id="tabMemory">Memory</button><button type="button" id="tabApp">App</button><button type="button" id="tabAccess" style="display:none">Access</button><button type="button" id="tabConnectors" style="display:none">Connectors</button><button type="button" id="tabModels" style="display:none">Models</button></div>
       <div id="panePersonal">
         <div class="field"><label for="aboutMe">About you</label><small>What should Accaza AI know about you? For example your work, your business, your goals.</small><textarea id="aboutMe" rows="4" maxlength="1500"></textarea></div>
         <div class="field"><label for="replyStyle">How should Accaza AI reply?</label><small>Tone, length, format. For example "Short answers, bullet points, prices in PHP".</small><textarea id="replyStyle" rows="3" maxlength="1500"></textarea></div>
@@ -499,6 +494,27 @@
         <div class="err" id="memoryErr"></div>
         <div id="memoryList"></div>
         <div style="margin-top:1rem"><button class="btn ghost" type="button" id="deleteMemoriesBtn">Delete all memories</button></div>
+      </div>
+      <div id="paneApp" style="display:none">
+        <div class="skillCard">
+          <b>Open</b>
+          <p>Jump straight to your work without going back to the chat.</p>
+          <div class="skillBar">
+            <button class="btn light small" type="button" id="canvasesBtn" style="display:none">Canvases</button>
+            <button class="btn light small" type="button" id="tasksBtn" style="display:none">Tasks</button>
+            <button class="btn light small" type="button" id="skillsBtn" style="display:none">Skills</button>
+          </div>
+        </div>
+        <div class="skillCard">
+          <b>Appearance</b>
+          <p>Auto follows your device's light or dark setting.</p>
+          <button class="btn light" type="button" id="themeBtn">Theme: auto</button>
+        </div>
+        <div class="skillCard">
+          <b>Chats</b>
+          <p>Deleting removes every saved conversation on this account. It cannot be undone.</p>
+          <button class="btn ghost" type="button" id="deleteAllBtn" style="display:none">Delete all chats</button>
+        </div>
       </div>
       <div id="paneAccess" style="display:none">
         <div class="sideNote" style="padding:0 0 .8rem">New verified accounts start with limited access. Grant full access when you want someone to use unlimited chat and the complete model list. Connectors, publishing and administration remain owner-only.</div>
@@ -1134,9 +1150,9 @@ q.addEventListener('keydown',ev=>{
 // ---------- Settings: personalise + memory ----------
 function openSettings(tab){show('settingsWrap');selectTab(tab||'personal');loadSettings();}
 function selectTab(tab){
-  const t=['personal','memory','access','connectors','models'].includes(tab)?tab:'personal';
-  by('tabPersonal').classList.toggle('on',t==='personal');by('tabMemory').classList.toggle('on',t==='memory');by('tabAccess').classList.toggle('on',t==='access');by('tabConnectors').classList.toggle('on',t==='connectors');by('tabModels').classList.toggle('on',t==='models');
-  by('panePersonal').style.display=t==='personal'?'block':'none';by('paneMemory').style.display=t==='memory'?'block':'none';by('paneAccess').style.display=t==='access'?'block':'none';by('paneConnectors').style.display=t==='connectors'?'block':'none';by('paneModels').style.display=t==='models'?'block':'none';
+  const t=['personal','memory','app','access','connectors','models'].includes(tab)?tab:'personal';
+  by('tabPersonal').classList.toggle('on',t==='personal');by('tabMemory').classList.toggle('on',t==='memory');by('tabApp').classList.toggle('on',t==='app');by('tabAccess').classList.toggle('on',t==='access');by('tabConnectors').classList.toggle('on',t==='connectors');by('tabModels').classList.toggle('on',t==='models');
+  by('panePersonal').style.display=t==='personal'?'block':'none';by('paneMemory').style.display=t==='memory'?'block':'none';by('paneApp').style.display=t==='app'?'block':'none';by('paneAccess').style.display=t==='access'?'block':'none';by('paneConnectors').style.display=t==='connectors'?'block':'none';by('paneModels').style.display=t==='models'?'block':'none';
   if(t==='access')loadAccess();
   if(t==='connectors')loadConnectors();
   if(t==='models')loadModelAdmin();
@@ -1204,7 +1220,8 @@ by('mcpAddBtn').addEventListener('click',async()=>{
 });
 by('tabPersonal').addEventListener('click',()=>selectTab('personal'));
 by('tabMemory').addEventListener('click',()=>selectTab('memory'));
-by('settingsBtn').addEventListener('click',()=>{if(by('settingsWrap').style.display==='block')show('chatWrap');else openSettings('personal');});
+by('tabApp').addEventListener('click',()=>selectTab('app'));
+by('settingsBtn').addEventListener('click',()=>{if(by('settingsWrap').style.display==='block')show('chatWrap');else openSettings(saves()?'personal':'app');});
 function renderMemories(list){
   const box=by('memoryList');box.replaceChildren();
   if(!list.length){const n=document.createElement('div');n.className='sideNote';n.textContent='Nothing saved yet. Accaza AI will remember useful things you tell it, or add one above.';box.appendChild(n);return;}
@@ -1866,7 +1883,7 @@ async function render(user){
   }
   const changed=user.uid!==lastUid;lastUid=user.uid;
   by('signOutBtn').textContent=user.isAnonymous?'Exit guest':'Sign out';
-  by('settingsBtn').style.display='none';by('taskBtn').style.display='none';by('tasksBtn').style.display='none';by('skillsBtn').style.display='none';by('canvasesBtn').style.display='none';by('tabAccess').style.display='none';
+  by('taskBtn').style.display='none';by('tasksBtn').style.display='none';by('skillsBtn').style.display='none';by('canvasesBtn').style.display='none';by('tabAccess').style.display='none';
   ME={tier:user.isAnonymous?'guest':'limited'};setAllowance(null);
   by('whoLine').textContent='© 2026 Accaza AI';
   if(changed){current=null;chats=[];cv=null;closeCanvas();turns=user.isAnonymous?loadGuestTurns():[];}
@@ -1876,7 +1893,7 @@ async function render(user){
     if(me.tier==='unverified'){show('verifyWrap');return;}
     ME=me;setAllowance(me.remaining);
     by('taskBtn').style.display=me.tier==='owner'?'':'none';by('tasksBtn').style.display=me.tier==='owner'?'inline-block':'none';if(me.tier!=='owner')setTaskMode(false);
-    by('settingsBtn').style.display=saves()?'inline-block':'none';by('tabAccess').style.display=me.tier==='owner'?'inline-block':'none';by('tabConnectors').style.display=me.tier==='owner'?'inline-block':'none';by('tabModels').style.display=me.tier==='owner'?'inline-block':'none';
+    by('tabAccess').style.display=me.tier==='owner'?'inline-block':'none';by('tabConnectors').style.display=me.tier==='owner'?'inline-block':'none';by('tabModels').style.display=me.tier==='owner'?'inline-block':'none';
     loadModelMenu();
     if(connectorReturn&&saves()){const st=connectorReturn;connectorReturn=null;openSettings('connectors');const msg={connected:'Google connected.','no-access':'Google connected, but no access was granted. Try again and tick the boxes.',cancelled:'Google sign-in was cancelled.',expired:'That sign-in link expired. Please try again.',error:'Google sign-in failed. Please try again.'}[st]||'';setTimeout(()=>{showMsg(st==='connected'?'connInfo':'connErr',msg);},400);}by('skillsBtn').style.display=saves()?'inline-block':'none';by('canvasesBtn').style.display=saves()?'inline-block':'none';mySkills=[];
     by('whoLine').textContent='© 2026 Accaza AI · v'+(me.version||'?')+(me.build?' · '+me.build:'');by('whoLine').title='Running release '+(me.version||'unknown')+(me.build?' built '+me.build:'');
