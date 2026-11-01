@@ -47,7 +47,8 @@ async function safeFetch(raw, {method = "GET", headers = {}, body, timeoutMs = 1
         chunks.push(value);
       }
     }
-    return {url: url.toString(), status: response.status, contentType: String(response.headers.get("content-type") || ""), headers: response.headers, text: Buffer.concat(chunks.map(c => Buffer.from(c))).toString("utf8")};
+    const buffer = Buffer.concat(chunks.map(c => Buffer.from(c)));
+    return {url: url.toString(), status: response.status, contentType: String(response.headers.get("content-type") || ""), headers: response.headers, text: buffer.toString("utf8"), bytes: buffer};
   }
   throw new Error("Too many redirects.");
 }

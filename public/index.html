@@ -62,6 +62,9 @@
   .chatItem button{visibility:hidden;background:transparent;border:0;color:var(--muted);cursor:pointer;padding:.3rem .35rem;border-radius:5px;font-size:.8rem;}
   .chatItem:hover button,.chatItem.active button{visibility:visible;} .chatItem button:hover{color:var(--ink);background:var(--side-active);}
   .sideNote{font-size:.78rem;color:var(--muted);padding:.5rem .6rem;line-height:1.45;}
+  #chatSearchWrap{padding:0 .5rem .45rem;}
+  #chatSearch{width:100%;box-sizing:border-box;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:.42rem .55rem;font:inherit;font-size:.8rem;}
+  .chatItem a .hit{display:block;color:var(--muted);font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   #sideFoot{border-top:1px solid var(--line);padding:.6rem .7rem;display:flex;flex-direction:column;gap:.35rem;}
   #sideFoot .who{font-size:.78rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   #sideFoot .row{display:flex;gap:.35rem;flex-wrap:wrap;}
@@ -95,6 +98,11 @@
   #empty{display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:12vh 1rem 1rem;color:var(--muted);}
   #empty h2{font-family:'Playfair Display',serif;font-weight:600;color:var(--ink);font-size:1.6rem;margin:0 0 .5rem;}
   #empty p{margin:0;font-size:.85rem;}
+  .starters{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.55rem;width:100%;max-width:620px;margin:1.1rem auto 0;}
+  .starter{text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:.65rem .75rem;cursor:pointer;color:var(--ink);font:inherit;font-size:.82rem;line-height:1.4;}
+  .starter:hover{background:var(--side-hover);}
+  .starter b{display:block;font-size:.84rem;margin-bottom:.15rem;}
+  .starter small{color:var(--muted);font-size:.73rem;}
   .turn{display:flex;flex-direction:column;}
   .turn.user{align-items:flex-end;}
   .bubble{max-width:85%;border-radius:14px;padding:.65rem .9rem;font-size:.92rem;line-height:1.55;overflow-wrap:anywhere;}
@@ -108,6 +116,10 @@
   .turn.user .actions{justify-content:flex-end;}
   .actions button{background:transparent;border:0;color:var(--muted);font-size:.74rem;cursor:pointer;padding:.25rem .45rem;border-radius:6px;}
   .actions button:hover{background:var(--side-hover);color:var(--ink);}
+  .actions button.on{color:var(--accent-ink);background:var(--accent-soft);}
+  #micBtn{background:transparent;border:0;color:var(--muted);font-size:1.05rem;cursor:pointer;padding:.35rem .3rem;border-radius:8px;align-self:flex-end;display:none;}
+  #micBtn:hover{background:var(--side-hover);color:var(--ink);}
+  #micBtn.on{color:var(--danger);}
   /* Markdown */
   .md > :first-child{margin-top:0;} .md > :last-child{margin-bottom:0;}
   .md p{margin:.55rem 0;} .md ul,.md ol{margin:.5rem 0;padding-left:1.4rem;} .md li{margin:.2rem 0;}
@@ -173,6 +185,12 @@
   #skillsInner{max-width:760px;margin:0 auto;}
   #skillsWrap h2{font-family:'Playfair Display',serif;font-size:1.25rem;margin:0 0 .3rem;color:var(--accent-ink);}
   .skillBar{display:flex;gap:.5rem;flex-wrap:wrap;margin:.6rem 0 1rem;}
+  #storeSearch{width:100%;box-sizing:border-box;padding:.5rem .7rem;margin:0 0 .6rem;border-radius:8px;border:1px solid var(--input-line);background:var(--input);color:var(--ink);font:inherit;font-size:.86rem;}
+  .storeGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.6rem;margin:0 0 1.2rem;}
+  .storeCard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:.7rem .8rem;display:flex;flex-direction:column;gap:.25rem;}
+  .storeCard .tag{font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .storeCard b{font-size:.9rem;} .storeCard p{margin:0 0 .3rem;font-size:.78rem;color:var(--muted);line-height:1.4;flex:1;}
+  .storeCard .row{display:flex;}
   .skillCard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:.8rem .9rem;margin-bottom:.6rem;}
   .skillCard b{font-size:.92rem;} .skillCard p{margin:.3rem 0 .5rem;font-size:.8rem;color:var(--muted);line-height:1.45;}
   .skillCard .row{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;}
@@ -291,6 +309,7 @@
 <div id="app">
   <aside id="sidebar">
     <button id="newChatBtn" type="button">＋ New chat</button>
+    <div id="chatSearchWrap"><input type="search" id="chatSearch" placeholder="Search chats" autocomplete="off" aria-label="Search chats"/></div>
     <div id="chatList"></div>
     <div id="sideFoot">
       <div class="who" id="whoLine">© 2026 Accaza AI</div>
@@ -375,7 +394,7 @@
   <div id="chatWrap">
     <div id="banner"></div>
     <div id="scroller">
-      <div id="empty"><h2>What can I help with?</h2><p id="emptySub">Ask anything. Enter sends, Shift+Enter adds a new line.</p></div>
+      <div id="empty"><h2>What can I help with?</h2><p id="emptySub">Ask anything. Enter sends, Shift+Enter adds a new line.</p><div class="starters" id="starters"></div></div>
       <div id="messages"></div>
     </div>
     <div id="composer">
@@ -386,6 +405,7 @@
         <button id="taskBtn" type="button" aria-pressed="false" title="Task mode: your laptop works on it step by step (code, files, research)" style="display:none">⚙<span class="lbl"> Task</span></button>
         <input id="taskFileInput" type="file" multiple hidden accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.md,.csv,.tsv,.json,.xml,.html,.xlsx,.xls,.docx,.doc,.pptx,.zip"/>
         <button id="attachBtn" type="button" title="Attach photos or PDFs (up to 3, 7 MB each)" aria-label="Attach files">📎</button>
+        <button id="micBtn" type="button" title="Dictate" aria-label="Dictate">🎤</button>
         <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/heic,image/heif,application/pdf,.heic,.heif" multiple hidden/>
         <select id="modelSelect" title="Choose the AI model" aria-label="AI model"><option value="auto">Auto</option></select>
         <textarea id="question" maxlength="4000" rows="1" placeholder="" aria-label="Message Accaza AI"></textarea>
@@ -399,9 +419,17 @@
     <div id="skillsInner">
       <div id="skillListView">
         <h2>Skills</h2>
-        <div class="sideNote" style="padding:0">Skills are instructions plus reference files (SOPs, recipes, price lists) that Accaza AI uses when a question matches. Type <b>/</b> in the message box to use one directly. Claude-style skill .zip files and SKILL.md work too.</div>
-        <div class="skillBar"><button class="btn" type="button" id="newSkillBtn">＋ New skill</button><button class="btn light" type="button" id="importSkillBtn">Import .zip / SKILL.md</button><input type="file" id="importSkillInput" accept=".zip,.md" hidden/></div>
+        <div class="sideNote" style="padding:0">Skills are instructions plus reference files (SOPs, recipes, price lists) that Accaza AI uses when a question matches. Type <b>/</b> in the message box to use one directly. Claude-style skill .zip files and SKILL.md work too, and you can install a skill or a plugin straight from a link.</div>
+        <div class="skillBar"><button class="btn" type="button" id="newSkillBtn">＋ New skill</button><button class="btn light" type="button" id="importSkillBtn">Import .zip / SKILL.md</button><button class="btn light" type="button" id="installSkillBtn">Install from a link</button><input type="file" id="importSkillInput" accept=".zip,.md" hidden/></div>
+        <div id="installBox" style="display:none;margin:0 0 .9rem">
+          <div class="field"><label for="installUrl">Skill or plugin link</label><small>Paste a GitHub repo or folder, a skill .zip, or a raw SKILL.md link. A plugin installs every skill it contains.</small><input type="text" id="installUrl" placeholder="https://github.com/owner/skills" autocomplete="off" spellcheck="false"/></div>
+          <div class="skillBar"><button class="btn" type="button" id="installRunBtn">Install</button><button class="btn light" type="button" id="installCancelBtn">Cancel</button><span class="saved" id="installSaved"></span></div>
+        </div>
         <div class="err" id="skillsErr"></div><div class="info" id="skillsInfo"></div>
+        <h2>Browse</h2>
+        <input type="text" id="storeSearch" placeholder="Search skills and packs" autocomplete="off" aria-label="Search skills and packs"/>
+        <div class="storeGrid" id="storeList"></div>
+        <h2>Your skills</h2>
         <div id="skillList"></div>
       </div>
       <div id="skillEditView" style="display:none">
@@ -662,6 +690,27 @@ function renderTurns(){
   by('empty').style.display=turns.length?'none':'flex';refreshActions();toBottom(true);
 }
 function actionButton(label,handler){const b=document.createElement('button');b.type='button';b.textContent=label;b.addEventListener('click',handler);return b;}
+// Read aloud uses the browser's own voice; feedback marks an answer good or bad for the owner.
+const speechOK=typeof window!=='undefined'&&'speechSynthesis' in window&&typeof SpeechSynthesisUtterance==='function';
+let speakingBtn=null;
+function readAloud(turn,btn){
+  if(!speechOK)return;
+  if(speakingBtn===btn){window.speechSynthesis.cancel();speakingBtn=null;btn.textContent='🔊 Read';return;}
+  window.speechSynthesis.cancel();
+  if(speakingBtn)speakingBtn.textContent='🔊 Read';
+  const text=String((turn.bubble&&turn.bubble.dataset.raw)||turn.text||'').replace(/```[\s\S]*?```/g,'').replace(/[#*_>`]/g,'').slice(0,4000);
+  if(!text.trim())return;
+  const u=new SpeechSynthesisUtterance(text);
+  u.onend=()=>{if(speakingBtn===btn){speakingBtn=null;btn.textContent='🔊 Read';}};
+  btn.textContent='⏹ Stop';speakingBtn=btn;window.speechSynthesis.speak(u);
+}
+async function sendFeedback(turn,value){
+  if(!turn.id||!current)return;
+  const before=turn.feedback||'',next=before===value?'':value;
+  turn.feedback=next;refreshActions();
+  try{await accountCall({action:'feedback',chatId:current.id,messageId:turn.id,value:next});}
+  catch(e){turn.feedback=before;refreshActions();}
+}
 function refreshActions(){
   const lastAi=[...turns].reverse().find(t=>t.role==='model'&&!t.error),lastUser=[...turns].reverse().find(t=>t.role==='user');
   const answeredLast=turns.length>=2&&turns[turns.length-1].role==='model'&&!turns[turns.length-1].error&&turns[turns.length-2].role==='user'&&!turns[turns.length-1].task;
@@ -672,6 +721,12 @@ function refreshActions(){
     if(t.role==='model'&&!t.error){
       if(t.memory){const n=document.createElement('button');n.type='button';n.className='memNote';n.textContent='Memory updated ✓';n.title=t.memory;n.addEventListener('click',()=>openSettings('memory'));t.actions.append(n);}
       t.actions.append(actionButton('Copy',e=>copyText(t.text,e.currentTarget)));
+      if(speechOK)t.actions.append(actionButton('🔊 Read',e=>readAloud(t,e.currentTarget)));
+      if(t.id&&saves()){
+        const up=actionButton('👍',()=>sendFeedback(t,'up')),down=actionButton('👎',()=>sendFeedback(t,'down'));
+        up.title='Good answer';down.title='Bad answer';up.classList.toggle('on',t.feedback==='up');down.classList.toggle('on',t.feedback==='down');
+        t.actions.append(up,down);
+      }
       if(t===lastAi&&answeredLast&&!busy)t.actions.append(actionButton('Regenerate',()=>send('regenerate')));
     }
     if(t.role==='user'){
@@ -787,7 +842,7 @@ async function send(mode){
 
 function newChat(){
   if(busy)return;current=null;turns=[];cv=null;closeCanvas();cancelEdit();pinnedSkill=null;clearChips();applyModelFor(null);try{sessionStorage.removeItem(LAST_CHAT);sessionStorage.removeItem(GUEST_TURNS);}catch(e){}
-  renderTurns();renderChatList();show('chatWrap');q.focus();
+  by('chatSearch').value='';renderTurns();renderChatList();show('chatWrap');q.focus();
 }
 by('newChatBtn').addEventListener('click',newChat);
 async function openChat(id,quiet){
@@ -795,8 +850,8 @@ async function openChat(id,quiet){
   if(cv&&cv.chatId!==id){cv=null;closeCanvas();}
   try{
     const data=(await accountCall({action:'messages',chatId:id})).data||{};
-    current={id:data.chat.id,title:data.chat.title};turns=(data.messages||[]).map(m=>({role:m.role,text:m.text,id:m.id,attachments:m.attachments||[],sources:m.sources||[],canvas:m.canvas||null,task:m.task||null,taskFiles:m.taskFiles||[]}));
-    cancelEdit();renderTurns();renderChatList();show('chatWrap');applyModelFor(id);try{sessionStorage.setItem(LAST_CHAT,id);}catch(e){}
+    current={id:data.chat.id,title:data.chat.title};turns=(data.messages||[]).map(m=>({role:m.role,text:m.text,id:m.id,feedback:m.feedback||'',attachments:m.attachments||[],sources:m.sources||[],canvas:m.canvas||null,task:m.task||null,taskFiles:m.taskFiles||[]}));
+    by('chatSearch').value='';cancelEdit();renderTurns();renderChatList();show('chatWrap');applyModelFor(id);try{sessionStorage.setItem(LAST_CHAT,id);}catch(e){}
   }catch(e){if(!quiet){chats=chats.filter(c=>c.id!==id);renderChatList();}newChat();}
 }
 function renderChatList(){
@@ -849,20 +904,121 @@ async function loadChats(){
   if(last&&chats.some(c=>c.id===last))openChat(last,true);
 }
 
+// ---------- Search chats (sidebar) ----------
+let searchSeq=0,searchTimer=0;
+by('chatSearch').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(runChatSearch,300);});
+by('chatSearch').addEventListener('keydown',ev=>{if(ev.key==='Escape'){by('chatSearch').value='';renderChatList();}});
+async function runChatSearch(){
+  const term=by('chatSearch').value.trim();
+  if(!saves())return;
+  if(term.length<2){renderChatList();return;}
+  const seq=++searchSeq;
+  try{const data=(await accountCall({action:'searchChats',query:term})).data||{};if(seq===searchSeq)renderSearchResults(term,data.results||[]);}
+  catch(e){if(seq===searchSeq)renderSearchResults(term,[],cleanErr(e,'Could not search your chats.'));}
+}
+function renderSearchResults(term,results,error){
+  const list=by('chatList');list.replaceChildren();
+  const label=document.createElement('div');label.className='listLabel';label.textContent='Results for “'+term+'”';list.appendChild(label);
+  if(error){const n=document.createElement('div');n.className='sideNote';n.textContent=error;list.appendChild(n);return;}
+  if(!results.length){const n=document.createElement('div');n.className='sideNote';n.textContent='No saved chats match that.';list.appendChild(n);return;}
+  results.forEach(r=>{
+    const row=document.createElement('div'),a=document.createElement('a');
+    row.className='chatItem'+(current&&current.id===r.id?' active':'');a.textContent=r.title;a.title=r.title;
+    if(r.match&&r.match.snippet){const hit=document.createElement('small');hit.className='hit';hit.textContent=r.match.snippet;a.appendChild(hit);}
+    a.addEventListener('click',()=>{by('chatSearch').value='';openChat(r.id);});
+    row.append(a);list.appendChild(row);
+  });
+}
+
+// ---------- Starter prompts (the empty screen) ----------
+const STARTERS=[
+  {t:'Write an email',s:'Warm, short, ready to send',p:'Draft a warm, short email to my supplier asking for a quote on 20 kg of coffee beans.'},
+  {t:'Explain it simply',s:'Plain language, one example',p:'Explain how compound interest works, simply, with one example.'},
+  {t:'Plan my week',s:'Ask me what is on first',p:'Help me plan my week. Ask me what is on my plate first.'},
+  {t:'Study with me',s:'Explain, then quiz me',p:'Quiz me on a topic I am studying. Ask me which topic first.'},
+];
+function renderStarters(){
+  const box=by('starters');if(!box)return;box.replaceChildren();
+  STARTERS.forEach(s=>{
+    const b=document.createElement('button'),t=document.createElement('b'),h=document.createElement('small');
+    b.type='button';b.className='starter';t.textContent=s.t;h.textContent=s.s;b.append(t,h);
+    b.addEventListener('click',()=>{if(busy)return;q.value=s.p;autosize();q.focus();});
+    box.appendChild(b);
+  });
+}
+renderStarters();
+
+// ---------- Dictation (voice input) ----------
+const SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec=null,recOn=false,recBase='';
+if(SpeechRec){
+  const mic=by('micBtn');mic.style.display='inline-block';
+  mic.addEventListener('click',()=>{
+    if(recOn&&rec){rec.stop();return;}
+    recBase=q.value.trim()?q.value.trim()+' ':'';
+    try{rec=new SpeechRec();}catch(e){return;}
+    rec.lang=navigator.language||'en-US';rec.interimResults=true;rec.continuous=false;
+    rec.onresult=ev=>{let said='';for(const r of ev.results)said+=r[0].transcript;q.value=recBase+said;autosize();};
+    rec.onerror=()=>{recOn=false;mic.classList.remove('on');mic.title='Dictate';};
+    rec.onend=()=>{recOn=false;mic.classList.remove('on');mic.title='Dictate';q.focus();};
+    recOn=true;mic.classList.add('on');mic.title='Listening… tap to stop';
+    try{rec.start();}catch(e){recOn=false;mic.classList.remove('on');mic.title='Dictate';}
+  });
+}
+
 // ---------- Skills ----------
 let mySkills=[],canShare=false,editingSkill=null,pinnedSkill=null;
 async function loadSkills(){
   try{const d=(await skillsCall({action:'list'})).data||{};mySkills=d.skills||[];canShare=d.canShare===true;}catch(e){mySkills=[];}
   return mySkills;
 }
-function openSkills(){show('skillsWrap');by('skillEditView').style.display='none';by('skillListView').style.display='block';showMsg('skillsErr','');showMsg('skillsInfo','');renderSkillList();}
+// Browse: ready-made skills and packs, installed with one tap.
+let storeCatalog=null,storeQuery='';
+async function loadCatalog(force){
+  if(storeCatalog&&!force)return storeCatalog;
+  try{storeCatalog=((await skillsCall({action:'catalog'})).data||{}).templates||[];}catch(e){storeCatalog=[];}
+  return storeCatalog;
+}
+function installedTemplates(){
+  const set=new Set();
+  (mySkills||[]).forEach(sk=>{if(sk.from&&sk.from.template)set.add(sk.from.template);});
+  return set;
+}
+async function renderStore(){
+  const box=by('storeList');if(!box)return;
+  if(!mySkills.length)await loadSkills();
+  const templates=await loadCatalog(),installed=installedTemplates(),term=storeQuery.trim().toLowerCase();
+  box.replaceChildren();
+  const shown=templates.filter(t=>!term||[t.name,t.description,t.category,...(t.skills||[])].join(' ').toLowerCase().includes(term));
+  if(!shown.length){const n=document.createElement('div');n.className='sideNote';n.style.padding='0';n.textContent='Nothing matches that search.';box.appendChild(n);return;}
+  shown.forEach(t=>{
+    const card=document.createElement('div'),tag=document.createElement('div'),title=document.createElement('b'),p=document.createElement('p'),row=document.createElement('div'),btn=document.createElement('button');
+    card.className='storeCard';tag.className='tag';
+    tag.textContent=(t.emoji?t.emoji+' ':'')+t.category+(t.kind==='plugin'?' · '+t.skillCount+' skills':'');
+    title.textContent=t.name;p.textContent=t.description;row.className='row';
+    btn.type='button';btn.className=installed.has(t.id)?'btn light small':'btn small';btn.textContent=installed.has(t.id)?'Installed ✓':'Install';
+    if(installed.has(t.id))btn.title='Install again to refresh it';
+    btn.addEventListener('click',()=>installTemplate(t.id,btn));
+    row.append(btn);card.append(tag,title,p,row);box.appendChild(card);
+  });
+}
+async function installTemplate(id,btn){
+  const label=btn.textContent;btn.disabled=true;btn.textContent='Installing…';showMsg('skillsErr','');
+  try{
+    const res=(await skillsCall({action:'installTemplate',templateId:id})).data||{};
+    showMsg('skillsInfo','Installed '+((res.skills||[]).map(s=>s.name).join(', '))+'.');
+    await renderSkillList();renderStore();
+  }catch(e){showMsg('skillsErr',cleanErr(e,'Could not install that pack.'));btn.disabled=false;btn.textContent=label;}
+}
+by('storeSearch').addEventListener('input',()=>{storeQuery=by('storeSearch').value;renderStore();});
+async function openSkills(){show('skillsWrap');by('skillEditView').style.display='none';by('skillListView').style.display='block';showMsg('skillsErr','');showMsg('skillsInfo','');await renderSkillList();renderStore();}
 async function renderSkillList(){
   const box=by('skillList');box.textContent='Loading…';await loadSkills();box.replaceChildren();
-  if(!mySkills.length){const n=document.createElement('div');n.className='sideNote';n.style.padding='0';n.textContent='No skills yet. Create one, or import a skill .zip.';box.appendChild(n);return;}
+  if(!mySkills.length){const n=document.createElement('div');n.className='sideNote';n.style.padding='0';n.textContent='No skills yet. Create one, install one from a link, or import a skill .zip.';box.appendChild(n);return;}
   mySkills.forEach(sk=>{
     const card=document.createElement('div'),title=document.createElement('b'),p=document.createElement('p'),row=document.createElement('div'),meta=document.createElement('small');
     card.className='skillCard';title.textContent=sk.name;p.textContent=sk.description;row.className='row';
-    meta.textContent=[sk.shared?'Shared with everyone':'Private',sk.mine?'':'by '+(sk.ownerName||'owner'),sk.files.length?sk.files.length+' file'+(sk.files.length>1?'s':''):''].filter(Boolean).join(' · ');
+    meta.textContent=[sk.shared?'Shared with everyone':'Private',sk.mine?'':'by '+(sk.ownerName||'owner'),sk.from&&sk.from.plugin?'from '+sk.from.plugin:'',sk.files.length?sk.files.length+' file'+(sk.files.length>1?'s':''):''].filter(Boolean).join(' · ');
     const use=document.createElement('button');use.className='btn small';use.type='button';use.textContent='Use in chat';use.addEventListener('click',()=>{pinnedSkill={id:sk.id,name:sk.name};renderChips();show('chatWrap');q.focus();});
     row.append(meta,use);
     if(sk.mine){const ed=document.createElement('button');ed.className='btn light small';ed.type='button';ed.textContent='Edit';ed.addEventListener('click',()=>editSkill(sk.id));row.appendChild(ed);}
@@ -913,6 +1069,25 @@ by('saveSkillBtn').addEventListener('click',async()=>{
 });
 by('addSkillFilesBtn').addEventListener('click',()=>by('skillFileInput').click());
 by('skillFileInput').addEventListener('change',async ev=>{const files=ev.target.files;ev.target.value='';if(!editingSkill)return;await uploadSkillFiles(files,editingSkill.id,'skillFileInfo','skillFileErr');editSkill(editingSkill.id);});
+// Install a skill or a plugin straight from a link (GitHub repo/folder, .zip, raw SKILL.md).
+by('installSkillBtn').addEventListener('click',()=>{const b=by('installBox');b.style.display=b.style.display==='none'?'block':'none';if(b.style.display==='block')by('installUrl').focus();});
+by('installCancelBtn').addEventListener('click',()=>{by('installBox').style.display='none';by('installSaved').textContent='';});
+by('installUrl').addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();installFromLink();}});
+by('installRunBtn').addEventListener('click',installFromLink);
+async function installFromLink(){
+  const url=by('installUrl').value.trim(),btn=by('installRunBtn');
+  showMsg('skillsErr','');showMsg('skillsInfo','');
+  if(!url){showMsg('skillsErr','Paste a link first.');return;}
+  btn.disabled=true;by('installSaved').textContent='Installing… (a large package can take a minute)';
+  try{
+    const res=(await skillsCall({action:'install',url})).data||{},skills=res.skills||[];
+    const head=res.kind==='plugin'?('Installed plugin '+((res.plugin&&res.plugin.name)||'')+' — '):'Installed ';
+    by('installSaved').textContent='';by('installUrl').value='';
+    showMsg('skillsInfo',[head+skills.map(s=>s.name+(s.updated?' (updated)':'')).join(', ')+'.',...(res.notes||[])].join(' '));
+    await renderSkillList();renderStore();
+  }catch(e){by('installSaved').textContent='';showMsg('skillsErr',cleanErr(e,'Could not install that link.'));}
+  btn.disabled=false;
+}
 by('importSkillBtn').addEventListener('click',()=>by('importSkillInput').click());
 by('importSkillInput').addEventListener('change',async ev=>{
   const file=ev.target.files[0];ev.target.value='';if(!file)return;showMsg('skillsErr','');

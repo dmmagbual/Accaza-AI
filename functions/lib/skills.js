@@ -107,7 +107,7 @@ async function pdfToText(key, bytes, fetchImpl = fetch) {
 
 function canEdit(skill, actor) { return skill.ownerUid === actor.uid; }
 function publicSkill(id, s, actor) {
-  return {id, name: s.name, description: s.description, shared: s.shared === true, mine: s.ownerUid === actor.uid, ownerName: s.ownerName || "", files: (s.files || []).map(f => ({name: f.name, chars: f.chars, chunks: f.chunks})), updatedAt: s.updatedAt || 0};
+  return {id, name: s.name, description: s.description, shared: s.shared === true, mine: s.ownerUid === actor.uid, ownerName: s.ownerName || "", from: s.source ? {kind: s.source.kind || "", template: s.source.template || "", plugin: s.source.plugin || "", url: s.source.url || ""} : null, files: (s.files || []).map(f => ({name: f.name, chars: f.chars, chunks: f.chunks})), updatedAt: s.updatedAt || 0};
 }
 // Skills visible to one account: their own plus any the owner published to everyone.
 async function visibleSkills(db, actor) {
@@ -236,6 +236,32 @@ async function deleteSkill(db, actor, data) {
   return {deleted: skill.id};
 }
 
+// Installs one skill from a link or a plugin: creates it, or updates the caller's skill with the
+// same name (so installing again refreshes it). Files are read and indexed; one bad file is
+// reported in notes instead of failing the whole install.
+async function installSkill(db, key, actor, pkg, source, now) {
+  const wanted = skillSlug(pkg.name);
+  const existing = (await visibleSkills(db, actor)).find(s => s.ownerUid === actor.uid && skillSlug(s.name) === wanted);
+  const {id} = await saveSkill(db, actor, {skillId: existing ? existing.id : undefined, name: pkg.name, description: pkg.description, instructions: pkg.instructions, shared: existing ? existing.shared === true : false}, now);
+  const skill = await getVisibleSkill(db, actor, id), notes = [], files = [];
+  try {
+    await skill.ref.set({source: Object.assign({}, source), updatedAt: now}, {merge: true});
+    for (const file of (pkg.files || []).slice(0, LIMITS.filesPerSkill)) {
+      let text = file.text;
+      if (file.pdf) {
+        try { text = await pdfToText(key, file.pdf); }
+        catch (error) { notes.push(`Could not read ${file.name}: ${clean(error && error.message, 160)}`); continue; }
+      }
+      try { files.push(await addFileText(db, key, skill, file.name, text, now)); }
+      catch (error) { notes.push(`${file.name}: ${clean(error && error.message, 160)}`); }
+    }
+  } catch (error) {
+    if (!existing) await db.recursiveDelete(skill.ref).catch(() => {});
+    throw error;
+  }
+  return {id, name: skill.data.name, updated: Boolean(existing), files: files.map(f => f.name), notes};
+}
+
 // ---------- Chat side ----------
 function catalogBlock(skills, pinned) {
   if (!skills.length) return "";
@@ -272,4 +298,4 @@ function skillTools(db, key, skills, embedImpl = embed) {
   };
 }
 
-module.exports = {LIMITS, EMBED_MODEL, EMBED_DIMS, parseSkillMd, chunkText, readZip, embed, pdfToText, publicSkill, visibleSkills, getVisibleSkill, saveSkill, addFileText, uploadSkillFile, deleteSkillFile, deleteSkill, catalogBlock, skillTools, TOOL_DECLARATIONS};
+module.exports = {LIMITS, EMBED_MODEL, EMBED_DIMS, parseSkillMd, chunkText, readZip, embed, pdfToText, publicSkill, visibleSkills, getVisibleSkill, saveSkill, addFileText, installSkill, uploadSkillFile, deleteSkillFile, deleteSkill, catalogBlock, skillTools, TOOL_DECLARATIONS};

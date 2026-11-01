@@ -14,6 +14,7 @@ const Chats = require("./lib/chats");
 const Files = require("./lib/files");
 const Memory = require("./lib/memory");
 const Skills = require("./lib/skills");
+const Install = require("./lib/install");
 const {combineTools} = require("./lib/tools");
 const Web = require("./lib/websearch");
 const Google = require("./lib/google");
@@ -25,7 +26,7 @@ const {getStorage} = require("firebase-admin/storage");
 
 initializeApp();
 setGlobalOptions({region: "asia-southeast1", maxInstances: 10});
-const RELEASE_VERSION = "1.14";
+const RELEASE_VERSION = "1.15";
 const QUESTION_CHARS = 4000;
 
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
@@ -117,6 +118,9 @@ exports.skills = onCall({enforceAppCheck: true, timeoutSeconds: 300, memory: "1G
   if (action === "list") return {skills: (await Skills.visibleSkills(db, actor)).map(s => Skills.publicSkill(s.id, s, actor)).sort((a, b) => b.updatedAt - a.updatedAt), canShare: actor.tier === "owner"};
   if (action === "get") { const s = await Skills.getVisibleSkill(db, actor, data.skillId); return Object.assign(Skills.publicSkill(s.id, s.data, actor), {instructions: s.data.instructions || ""}); }
   if (action === "save") return Skills.saveSkill(db, actor, data, now);
+  if (action === "catalog") return {templates: Install.templates()};
+  if (action === "installTemplate") return Install.installTemplate(db, key, actor, data, now);
+  if (action === "install") return Install.installFromUrl(db, key, actor, data, now);
   if (action === "upload") return Skills.uploadSkillFile(db, key, actor, data, now);
   if (action === "deleteFile") return Skills.deleteSkillFile(db, actor, data, now);
   if (action === "delete") return Skills.deleteSkill(db, actor, data);
@@ -206,7 +210,7 @@ exports.chat = onCall({enforceAppCheck: true, timeoutSeconds: 300, memory: "512M
   const big = saves && Canvas.canvasMode(question, canvasState.canvas);
   let canvasInfo = null;
   const canvasToolSet = big ? Canvas.canvasTools(db, account.uid, canvasState, now, info => { canvasInfo = {id: info.id, title: info.title, kind: info.kind, version: info.version}; response.sendChunk({canvas: info}).catch(() => {}); }) : null;
-  const tools = combineTools([canvasToolSet, skills.length ? Skills.skillTools(db, geminiKey, skills) : null, web, ...connectorTools]);
+  const tools = combineTools([canvasToolSet, saves ? Install.installTool({db, key: geminiKey, actor: account, now}) : null, skills.length ? Skills.skillTools(db, geminiKey, skills) : null, web, ...connectorTools]);
   const today = `Today's date in Manila is ${Access.manilaDay(now)}.`;
   const system = [today, big ? Canvas.canvasBlock(canvasState.canvas, data.canvasSelection) : "", Web.GUIDE, autoWebContext, connectorNote, saves ? Memory.personalBlock(settings, memories) : "", Skills.catalogBlock(skills, pinned)].filter(Boolean).join("\n\n");
   let result, picked = null;
@@ -282,6 +286,8 @@ exports.account = onCall({enforceAppCheck: true, timeoutSeconds: 60, memory: "25
     renameChat: () => Chats.renameChat(db, actor.uid, data.chatId, data.title),
     deleteChat: async () => { const out = await Chats.deleteChat(db, actor.uid, data.chatId); out.filesDeleted = await purgeUploads(db, actor.uid, out.fileIds); delete out.fileIds; out.tasksDeleted = await Tasks.deleteTasks(db, taskBucket(), actor.uid, out.deleted); return out; },
     deleteAllChats: async () => { const out = await Chats.deleteAllChats(db, actor.uid); out.filesDeleted = await purgeUploads(db, actor.uid, null); out.tasksDeleted = await Tasks.deleteTasks(db, taskBucket(), actor.uid, null); return out; },
+    searchChats: () => Chats.searchChats(db, actor.uid, data.query),
+    feedback: () => Chats.saveFeedback(db, actor.uid, data, now, actor.tier),
     getSettings: async () => ({settings: await Memory.loadSettings(db, actor.uid), memories: await Memory.listMemories(db, actor.uid)}),
     saveSettings: async () => ({settings: await Memory.saveSettings(db, actor.uid, data.settings || {}, now)}),
     addMemory: () => Memory.addMemory(db, actor.uid, data.text, now),
