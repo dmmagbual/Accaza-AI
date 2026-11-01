@@ -1879,7 +1879,7 @@ async function render(user){
     by('settingsBtn').style.display=saves()?'inline-block':'none';by('tabAccess').style.display=me.tier==='owner'?'inline-block':'none';by('tabConnectors').style.display=me.tier==='owner'?'inline-block':'none';by('tabModels').style.display=me.tier==='owner'?'inline-block':'none';
     loadModelMenu();
     if(connectorReturn&&saves()){const st=connectorReturn;connectorReturn=null;openSettings('connectors');const msg={connected:'Google connected.','no-access':'Google connected, but no access was granted. Try again and tick the boxes.',cancelled:'Google sign-in was cancelled.',expired:'That sign-in link expired. Please try again.',error:'Google sign-in failed. Please try again.'}[st]||'';setTimeout(()=>{showMsg(st==='connected'?'connInfo':'connErr',msg);},400);}by('skillsBtn').style.display=saves()?'inline-block':'none';by('canvasesBtn').style.display=saves()?'inline-block':'none';mySkills=[];
-    by('whoLine').textContent='© 2026 Accaza AI';
+    by('whoLine').textContent='© 2026 Accaza AI · v'+(me.version||'?');by('whoLine').title='Running release '+(me.version||'unknown');
     if(saves()&&changed)await loadChats();else renderChatList();
   }catch(e){console.warn('account check failed',e);}
 }

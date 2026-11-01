@@ -61,3 +61,15 @@ jobs:
           service_account: github-deploy@accaza-ai.iam.gserviceaccount.com
       - name: Deploy functions, Firestore rules and hosting
         run: npx --yes firebase-tools@latest deploy --project accaza-ai --non-interactive --force
+      # A green deploy only means the upload worked, so check what the live site actually serves.
+      - name: Smoke test the live app
+        run: |
+          set -euo pipefail
+          html="$(curl -fsS --retry 5 --retry-delay 3 --retry-all-errors https://accaza-ai.web.app/)"
+          for marker in 'id="chatSearch"' 'id="starters"' 'id="micBtn"' 'sendFeedback'; do
+            case "$html" in
+              *"$marker"*) ;;
+              *) echo "::error::The live app is missing $marker"; exit 1 ;;
+            esac
+          done
+          echo "Live app serves the expected app shell ($(printf '%s' "$html" | wc -c) bytes)."

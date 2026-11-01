@@ -165,6 +165,7 @@ firebase functions:secrets:set OPENROUTER_API_KEY --project accaza-ai
 ## Test and deploy
 
 Pushing to `main` deploys automatically (`.github/workflows/deploy.yml`). The login is keyless: GitHub OIDC uses Workload Identity Federation to act as the `github-deploy@accaza-ai` service account, and it only accepts `dmmagbual/Accaza-AI` on `main`. Pull requests run the tests only.
+Pushing to `main` deploys automatically (`.github/workflows/deploy.yml`). The login is keyless: GitHub OIDC uses Workload Identity Federation to act as the `github-deploy@accaza-ai` service account, and it only accepts `dmmagbual/Accaza-AI` on `main`. Pull requests run the tests only. After deploying, the workflow loads the live site and fails the run if the app shell is missing, and the app's sidebar footer shows the release version it is running (`v1.15`), so a stale deploy is visible at a glance.
 
 To test locally, or deploy by hand in an emergency:
 
